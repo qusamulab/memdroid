@@ -1,8 +1,8 @@
 site_name: memdroid
 site_description: ADB-based Android memory modification toolkit
-site_url: https://ykus4.github.io/memdroid
-repo_url: https://github.com/ykus4/memdroid
-repo_name: ykus4/memdroid
+site_url: https://qusamulab.github.io/memdroid
+repo_url: https://github.com/qusamulab/memdroid
+repo_name: qusamulab/memdroid
 edit_uri: edit/main/docs/
 
 theme:

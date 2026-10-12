@@ -4,10 +4,10 @@
 
 **ADB-based Android memory modification toolkit — single binary with CLI + Web UI**
 
-[![CI](https://github.com/ykus4/memdroid/actions/workflows/ci.yml/badge.svg)](https://github.com/ykus4/memdroid/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/ykus4/memdroid)](https://github.com/ykus4/memdroid/releases/latest)
+[![CI](https://github.com/qusamulab/memdroid/actions/workflows/ci.yml/badge.svg)](https://github.com/qusamulab/memdroid/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/qusamulab/memdroid)](https://github.com/qusamulab/memdroid/releases/latest)
 [![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev)
-[![License](https://img.shields.io/github/license/ykus4/memdroid)](LICENSE)
+[![License](https://img.shields.io/github/license/qusamulab/memdroid)](LICENSE)
 
 </div>
 
@@ -28,12 +28,12 @@ Requires `adb` in PATH and an Android device with root (Magisk) + USB debugging.
 
 ## Documentation
 
-**Full documentation:** <https://ykus4.github.io/memdroid>
+**Full documentation:** <https://qusamulab.github.io/memdroid>
 
-- [Usage](https://ykus4.github.io/memdroid/usage/) — CLI menu, workflows, value types
-- [API Reference](https://ykus4.github.io/memdroid/api/) — REST + WebSocket
-- [Architecture](https://ykus4.github.io/memdroid/architecture/) — package structure, design decisions
-- [Development](https://ykus4.github.io/memdroid/development/) — setup, contributing
+- [Usage](https://qusamulab.github.io/memdroid/usage/) — CLI menu, workflows, value types
+- [API Reference](https://qusamulab.github.io/memdroid/api/) — REST + WebSocket
+- [Architecture](https://qusamulab.github.io/memdroid/architecture/) — package structure, design decisions
+- [Development](https://qusamulab.github.io/memdroid/development/) — setup, contributing
 
 ## License
 
