@@ -9,7 +9,7 @@
 ## Setup
 
 ```bash
-git clone https://github.com/ykus4/memdroid.git
+git clone https://github.com/qusamulab/memdroid.git
 cd memdroid
 go mod download
 
@@ -26,7 +26,7 @@ go build -o memdroid .
 
 ## Pre-commit Hooks
 
-Configured in [.pre-commit-config.yaml](https://github.com/ykus4/memdroid/blob/main/.pre-commit-config.yaml):
+Configured in [.pre-commit-config.yaml](https://github.com/qusamulab/memdroid/blob/main/.pre-commit-config.yaml):
 
 | Hook           | What it does                              |
 |----------------|-------------------------------------------|
@@ -41,7 +41,7 @@ Run manually at any time:
 pre-commit run --all-files
 ```
 
-Linter config: [.golangci.yml](https://github.com/ykus4/memdroid/blob/main/.golangci.yml)  
+Linter config: [.golangci.yml](https://github.com/qusamulab/memdroid/blob/main/.golangci.yml)  
 Enabled: `gofmt`, `goimports`, `govet`, `errcheck`, `staticcheck`
 
 ## Adding a New Feature

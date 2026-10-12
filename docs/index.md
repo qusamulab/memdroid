@@ -18,7 +18,7 @@ memdroid lets you inspect and modify memory of Android processes directly from y
 
 ### Download (recommended)
 
-Grab the latest binary for your platform from the [Releases](https://github.com/ykus4/memdroid/releases/latest) page:
+Grab the latest binary for your platform from the [Releases](https://github.com/qusamulab/memdroid/releases/latest) page:
 
 | Platform | File |
 |----------|------|
@@ -31,7 +31,7 @@ Grab the latest binary for your platform from the [Releases](https://github.com/
 ### Build from source
 
 ```bash
-git clone https://github.com/ykus4/memdroid.git
+git clone https://github.com/qusamulab/memdroid.git
 cd memdroid
 go build -o memdroid .
 ```
