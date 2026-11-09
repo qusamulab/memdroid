@@ -16,83 +16,101 @@
 
 ## Package Structure
 
-```
+```text
+cmd/memdroid/
+└── main.go                 # Flags, ADB selection, CLI + HTTP startup
 internal/
 ├── app/
-│   └── state.go           # Thread-safe shared state (Driver, PID, Session, Bookmarks)
+│   ├── state.go            # Shared state and subsystem construction
+│   ├── process.go          # Attach/switch/detach lifecycle shared by CLI/API
+│   ├── session.go          # Search session and active value type
+│   ├── persistence.go      # Save/load and live-driver rebinding
+│   └── snapshots.go        # Bounded region snapshot storage
+├── cli/
+│   ├── run.go              # Interactive loop and shutdown
+│   ├── command.go          # Action context and precondition guards
+│   ├── menu.go             # One menu table for rendering and dispatch
+│   ├── prompt.go           # Input parsing
+│   ├── output.go           # Shared terminal output
+│   └── *.go                # Device, process, search, memory, pointer,
+│                           # alert, bookmark and session actions
 ├── driver/
-│   ├── driver.go          # Driver interface + Region/RegionFilter types
-│   └── adb/
-│       ├── adb.go         # Device selection, shell helpers, Wi-Fi connect/disconnect
-│       ├── process.go     # ListProcesses, FindProcessByName, Attach, Detach, Stop, Continue
-│       ├── maps.go        # ReadMaps, ReadMapsFiltered — /proc/<pid>/maps parser
-│       └── mem.go         # Peek, Poke, ReadBytes — /proc/<pid>/mem via dd + base64
-├── driver/drivertest/
-│   └── fake.go            # In-memory driver.Driver for tests (no device needed)
+│   ├── driver.go           # Device/process/memory interface and region types
+│   ├── adb/                # Android Debug Bridge implementation
+│   └── drivertest/         # In-memory driver for device-free tests
 ├── server/
-│   ├── server.go          # Server lifecycle, auth, origin checks, URL helpers
-│   ├── routes.go          # The route table (path → method → handler)
-│   ├── handler.go         # Shared handler plumbing: JSON, hexAddr, validation
-│   ├── paths.go           # Confines client-supplied file paths to -file-root
-│   ├── handlers_*.go      # Endpoints, one file per resource
-│   ├── wswatch/
-│   │   └── wswatch.go     # WebSocket broadcast Hub for watch/alert events
-│   └── static/
-│       └── index.html     # Single-page Web UI
-└── memory/
-    ├── search/
-    │   ├── types.go       # ValueType (int32/64/float32/64/uint32/64/bytes), ParseValue, FormatValue
-    │   ├── session.go     # Session: candidate address → bytes map + Driver ref
-    │   ├── search.go      # Full scan (exact value, region-filtered, byte-sequence)
-    │   ├── filter.go      # Narrow candidates (changed/unchanged/increased/decreased/value)
-    │   ├── pattern.go     # Byte pattern search with ?? wildcard, chunked reads
-    │   └── string.go      # UTF-8 / UTF-16LE string search via SearchPattern
-    ├── pointer/
-    │   ├── pointer.go     # Pointer chain scan — find stable base+offset paths
-    │   └── resolve.go     # Re-resolve a saved chain against a new run
-    ├── modify/
-    │   ├── modify.go      # Write value / string to address
-    │   ├── undo.go        # Save previous value before modify, revert stack (mutex-guarded)
-    │   ├── freeze.go      # Freezer — periodic re-write, backed by poller.Pool
-    │   ├── snapshot.go    # Capture / diff a memory region
-    │   └── dump.go        # Hex dump memory region to file (bulk ReadRegion)
-    ├── watch/
-    │   ├── watch.go       # Watcher — poll for value change, backed by poller.Pool
-    │   ├── alert.go       # AlertWatcher — conditional watch + auto-write
-    │   └── listeners.go   # Generic fan-out registry for watch/alert events
-    └── store/
-        ├── bookmark.go    # Named address bookmarks with bulk modify
-        ├── cheatengine.go # Import CheatEngine .CT tables as bookmarks
-        └── save.go        # Save / Load versioned JSON state (bookmarks + candidates)
-
-internal/poller/
-└── poller.go             # Keyed goroutine manager shared by Freezer/Watcher/AlertWatcher
+│   ├── server.go           # HTTP lifecycle and watch event wiring
+│   ├── routes.go           # API route table and method restrictions
+│   ├── middleware.go       # Authentication, body limits and origin checks
+│   ├── urls.go             # Listen address and browser URL helpers
+│   ├── handler.go          # Request/response validation helpers
+│   ├── paths.go            # API file-path confinement
+│   ├── handlers_*.go       # One resource per file, with adjacent tests
+│   └── wswatch/            # Per-server WebSocket broadcast hub
+├── webui/
+│   ├── webui.go            # Embedded HTTP assets; no frontend build step
+│   ├── static/
+│   │   ├── index.html      # Semantic markup and declarative actions
+│   │   ├── styles.css      # Theme, components and responsive layout
+│   │   └── js/
+│   │       ├── app.js      # Action registration, navigation and startup
+│   │       ├── api.js      # JSON transport and connection/auth errors
+│   │       ├── ui.js       # Action dispatch, loading states and feedback
+│   │       ├── status.js   # Shared status and non-overlapping polling
+│   │       ├── watch.js    # Live event rendering and reconnection
+│   │       └── *.js        # Feature modules: device, process, search,
+│   │                       # candidates, memory, pointer, maps, bookmarks, session
+│   └── tests/              # Browser-helper tests using Node's test runner
+├── memory/
+│   ├── search/             # Typed, pattern and string scans; candidate filtering
+│   ├── pointer/            # Pointer-chain scan and resolution
+│   ├── modify/             # Writes, undo, freeze, dump and snapshot diff
+│   ├── watch/              # Change/alert polling and listener fan-out
+│   └── store/              # Bookmarks, CheatEngine import and versioned JSON
+└── poller/                 # Keyed background goroutine manager
 ```
 
-## CLI Source Layout
+## CLI and Application Boundaries
 
-The interactive menu lives in `package cli` under `internal/cli/`, one file per
-concern (`run.go` actions, `prompt.go` input helpers, `device.go`,
-`process.go`, `search.go`, `memory.go`, `pointer.go`, `alert.go`,
-`bookmarks.go`, `menu.go`). `main.go` wires flags, the ADB driver, shared
-state, and the HTTP server, then hands off to `cli.Run`.
+`cmd/memdroid/main.go` is the composition root. It configures the ADB driver,
+shared state and HTTP server, then runs the CLI. The displayed server URL is
+passed to the CLI explicitly instead of stored in a package variable.
 
-`menu.go` holds the menu as a single table where each entry carries its key,
-its label **and** its action. Dispatch indexes that same table, so a menu entry
-can never exist without a handler (or vice versa), and a duplicate key panics
-at startup rather than silently shadowing. Guards like `attached(...)` and
-`withSession(...)` wrap an action instead of each action re-checking
-preconditions.
+The CLI's `menu.go` holds each key, label and action together. `command.go`
+resolves fresh state for each action and applies attached/session guards.
+Feature handlers live beside related commands rather than in the menu loop.
+
+Both CLI and API call `app.State.Attach`, `SwitchProcess`, `Detach`, `Save` and
+`Load`. Process transitions are serialized independently of the state read
+lock, keeping slow device I/O from blocking status reads. A loaded session is
+rebound to the live driver before either frontend can use it.
+
+## Web UI Boundaries
+
+`webui` owns the embedded browser assets; `server` owns HTTP routing and API
+behavior. All assets still ship in a single Go binary. Native ES modules keep
+feature state private without a JavaScript framework or bundler.
+
+Markup uses `data-click`, `data-change`, `data-input` and `data-enter` actions.
+`app.js` binds those names to module exports; `ui.js` handles event delegation,
+loading states and notifications. Dynamic row arguments are escaped JSON data,
+so process names, bookmark values and addresses never become executable code.
+
+The setup strip links device selection, process attachment and searching.
+Status controls operation availability, value types are persisted through the
+API, and search results link to paginated candidates. Opening a data panel
+refreshes it automatically. Search/typing operations share a busy group to
+prevent overlapping session mutations. Status polling waits for each request
+to finish, and the watch socket reconnects with bounded backoff.
 
 ## Dependency Graph
 
 ```
-main
+cmd/memdroid
  ├── app.State
  ├── cli
  ├── driver/adb              (no internal deps — exec.Command("adb", ...) only)
- ├── driver/drivertest       → driver               (test fake)
- ├── server                  → app, driver, driver/adb, memory/*, server/wswatch
+ ├── server                  → app, driver, driver/adb, memory/*, server/wswatch, webui
  ├── memory/search           → driver
  ├── memory/pointer          → driver
  ├── memory/modify           → driver, memory/search, poller
@@ -149,7 +167,10 @@ State.GetSession()    → current search session (nil if not attached)
 State.GetPID()        → attached PID (0 if none)
 State.NewSession(pid) → replace the session with a fresh one
 State.EnsureSession() → creates session if nil
+State.Attach(pid, n)  → attach, activate and create a fresh session
+State.SwitchProcess(p)→ validate and activate an attached process
 State.Detach()        → unfreeze/unwatch, detach, promote the next process
+State.Save/Load(path) → persist and restore with the live driver
 ```
 
 `State.Detach()` exists because the CLI and the API both need exactly that

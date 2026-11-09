@@ -33,7 +33,7 @@ Grab the latest binary for your platform from the [Releases](https://github.com/
 ```bash
 git clone https://github.com/qusamulab/memdroid.git
 cd memdroid
-go build -o memdroid .
+go build -o memdroid ./cmd/memdroid
 ```
 
 ---

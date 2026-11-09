@@ -90,3 +90,85 @@ func ShowCandidates(st *app.State) {
 		}
 	}
 }
+
+func searchValue(c *cmd) {
+	val, ok := ParseValue("Value: ", c.vt)
+	if !ok {
+		return
+	}
+	sess := c.st.EnsureSession()
+	if err := sess.Search(val); err != nil {
+		fmt.Printf("Search failed: %v\n", err)
+		return
+	}
+	fmt.Printf("Found %d addresses\n", sess.CandidateCount())
+}
+
+// filterAction builds the action for one of the no-argument filter modes.
+func filterAction(mode search.FilterMode) action {
+	return func(c *cmd) {
+		if err := c.sess.Filter(mode, nil); err != nil {
+			fmt.Printf("Filter failed: %v\n", err)
+			return
+		}
+		fmt.Printf("Remaining: %d addresses\n", c.sess.CandidateCount())
+	}
+}
+
+func filterByValue(c *cmd) {
+	val, ok := ParseValue("Value: ", c.vt)
+	if !ok {
+		return
+	}
+	if err := c.sess.Filter(search.FilterValue, val); err != nil {
+		fmt.Printf("Filter failed: %v\n", err)
+		return
+	}
+	fmt.Printf("Remaining: %d addresses\n", c.sess.CandidateCount())
+}
+
+func resetSearch(c *cmd) {
+	if c.sess != nil {
+		c.sess.Reset()
+	}
+	fmt.Println("Search session reset")
+}
+
+func searchByPattern(c *cmd) {
+	pat, err := search.ParsePattern(Prompt("Pattern (e.g. FF 00 ?? 01): "))
+	if err != nil {
+		fmt.Printf("Invalid pattern: %v\n", err)
+		return
+	}
+	result, err := search.SearchPattern(c.drv, c.pid, pat)
+	if err != nil {
+		fmt.Printf("Pattern search failed: %v\n", err)
+		return
+	}
+	printScanResult(result)
+}
+
+func searchByString(enc search.StringEncoding) action {
+	label := "String (UTF-8): "
+	if enc == search.EncodingUTF16LE {
+		label = "String (UTF-16LE): "
+	}
+	return func(c *cmd) {
+		result, err := search.SearchString(c.drv, c.pid, Prompt(label), enc)
+		if err != nil {
+			fmt.Printf("Search failed: %v\n", err)
+			return
+		}
+		printScanResult(result)
+	}
+}
+
+func printScanResult(result search.PatternResult) {
+	for _, m := range result.Matches {
+		fmt.Printf("  Found at 0x%x\n", m.Addr)
+	}
+	fmt.Printf("Total: %d results\n", len(result.Matches))
+	if result.Truncated {
+		fmt.Printf("(stopped at the %d-result limit — narrow the pattern for more)\n", search.PatternMaxResults)
+	}
+}

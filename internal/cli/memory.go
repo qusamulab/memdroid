@@ -142,3 +142,84 @@ func ShowMaps(st *app.State) {
 		fmt.Printf("  0x%x - 0x%x  (%d KB)  %s\n", r.Start, r.End, (r.End-r.Start)/1024, name)
 	}
 }
+
+func modifyStringAt(c *cmd) {
+	addr, ok := ParseAddr("Address (hex): ")
+	if !ok {
+		return
+	}
+	if err := modify.WriteString(c.drv, c.pid, addr, Prompt("New string (UTF-8): ")); err != nil {
+		fmt.Printf("Modify failed: %v\n", err)
+		return
+	}
+	fmt.Println("Modified successfully")
+}
+
+func modifyAt(c *cmd) {
+	addr, ok := ParseAddr("Address (hex): ")
+	if !ok {
+		return
+	}
+	val, ok := ParseValue("New value: ", c.vt)
+	if !ok {
+		return
+	}
+	if err := c.st.UndoStack.WithUndo(c.drv, c.pid, addr, val); err != nil {
+		fmt.Printf("Modify failed: %v\n", err)
+		return
+	}
+	fmt.Printf("Modified 0x%x (undo available, depth: %d)\n", addr, c.st.UndoStack.Depth())
+}
+
+func undoLast(c *cmd) {
+	if err := c.st.UndoStack.Undo(); err != nil {
+		fmt.Printf("Undo: %v\n", err)
+		return
+	}
+	fmt.Printf("Undone (remaining depth: %d)\n", c.st.UndoStack.Depth())
+}
+
+func freezeAt(c *cmd) {
+	addr, ok := ParseAddr("Address (hex): ")
+	if !ok {
+		return
+	}
+	val, ok := ParseValue("Value to freeze: ", c.vt)
+	if !ok {
+		return
+	}
+	if err := c.st.Freezer.Freeze(c.drv, c.pid, addr, val); err != nil {
+		fmt.Printf("Freeze failed: %v\n", err)
+		return
+	}
+	fmt.Printf("Freezing 0x%x\n", addr)
+}
+
+func freezeAllCandidates(c *cmd) {
+	count := c.st.Freezer.FreezeAllCandidates(c.drv, c.sess)
+	fmt.Printf("Freezing %d addresses\n", count)
+}
+
+func unfreezeAt(c *cmd) {
+	addr, ok := ParseAddr("Address (hex): ")
+	if !ok {
+		return
+	}
+	if err := c.st.Freezer.Unfreeze(addr); err != nil {
+		fmt.Printf("Unfreeze: %v\n", err)
+		return
+	}
+	fmt.Printf("Unfrozen 0x%x\n", addr)
+}
+
+func unwatchAt(c *cmd) {
+	addr, ok := ParseAddr("Address (hex): ")
+	if !ok {
+		return
+	}
+	if err := c.st.Watcher.Unwatch(addr); err != nil {
+		fmt.Printf("Unwatch: %v\n", err)
+		return
+	}
+	fmt.Printf("Stopped watching 0x%x\n", addr)
+}

@@ -17,7 +17,7 @@ Inspect and modify memory of Android processes from your PC — no PC root requi
 
 ```bash
 # Download from Releases, or build from source:
-go build -o memdroid .
+go build -o memdroid ./cmd/memdroid
 
 # Connect device via USB (or Wi-Fi ADB), then:
 ./memdroid

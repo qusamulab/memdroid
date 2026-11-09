@@ -60,13 +60,10 @@ func (h *handler) processAttach(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid pid")
 		return
 	}
-	if err := h.state.GetDriver().Attach(req.PID); err != nil {
+	if err := h.state.Attach(req.PID, req.Name); err != nil {
 		serverError(w, "attach", err)
 		return
 	}
-	h.state.SetPID(req.PID)
-	h.state.AddAttached(req.PID, req.Name)
-	h.state.NewSession(req.PID)
 	writeOK(w, map[string]any{"pid": req.PID})
 }
 
@@ -106,19 +103,10 @@ func (h *handler) processSwitch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	found := false
-	for _, p := range h.state.ListAttached() {
-		if p.PID == req.PID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		writeError(w, http.StatusBadRequest, "pid is not attached")
+	if err := h.state.SwitchProcess(req.PID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	h.state.SetPID(req.PID)
-	h.state.NewSession(req.PID)
 	writeOK(w, map[string]any{"pid": req.PID})
 }
 

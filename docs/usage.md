@@ -8,7 +8,7 @@
 ## Build & Run
 
 ```bash
-go build -o memdroid .
+go build -o memdroid ./cmd/memdroid
 ./memdroid
 ```
 
@@ -175,6 +175,21 @@ Switch type with menu `6`. Changing type resets the search session.
 | custom | address range  | known library segment         |
 
 ## Web UI
+
+The setup strip guides you through **Connect device → Attach process → Search
+memory**. Selecting a device opens the process list; attaching opens search.
+Actions that require an attached process or search candidates become available
+when those prerequisites are met.
+
+Search uses the selected value type and memory region. Choosing a region from
+the Maps panel fills a custom range. Search results include a **View candidates**
+button; candidate rows can prefill Edit, Freeze and Pointer Scan. Opening a data
+panel refreshes it automatically.
+
+Fields have visible labels and support Enter for common actions. A working
+indicator prevents repeated submissions, notifications report results, and the
+activity history retains errors. The layout adapts to smaller windows with a
+scrollable navigation bar. The Watch panel reconnects after a connection loss.
 
 Open `http://localhost:8080` while memdroid is running. All features are available.
 

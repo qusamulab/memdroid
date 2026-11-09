@@ -57,8 +57,7 @@ func run() error {
 		}
 	}()
 
-	cli.ServerURL = server.DisplayURL(*addr)
-	cli.Run(st, d)
+	cli.Run(st, d, server.DisplayURL(*addr))
 
 	return srv.Shutdown()
 }

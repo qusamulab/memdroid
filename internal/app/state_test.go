@@ -550,10 +550,9 @@ func TestStateConcurrentDetach(t *testing.T) {
 	}
 	s.SetPID(1)
 
-	// Detach is a sequence of individually locked steps, so two callers can
-	// race for the same victim and one of them becomes a no-op. Each worker
-	// therefore keeps going until the state reports nothing is attached; the
-	// point of the test is that -race stays quiet and the drain terminates.
+	// Concurrent frontends can keep requesting detaches until all processes
+	// are released. Lifecycle operations serialize while status reads remain
+	// available; the drain must finish without races.
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
