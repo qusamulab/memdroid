@@ -47,12 +47,3 @@ func RequireAttached(pid int) bool {
 	}
 	return true
 }
-
-// RequireSession prints an error and returns false when there is no active search session.
-func RequireSession(s *search.Session) bool {
-	if s == nil || !s.HasCandidates() {
-		fmt.Println("No active search session. Run Search first.")
-		return false
-	}
-	return true
-}

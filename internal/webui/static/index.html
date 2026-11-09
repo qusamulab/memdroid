@@ -1,0 +1,934 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>memdroid</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <!-- ── Top bar ── -->
+    <div id="topbar">
+      <div class="logo">
+        mem<span>droid</span><small>MEMORY WORKSPACE</small>
+      </div>
+      <span id="connection-state" class="connection-state" role="status"
+        >Connecting…</span
+      >
+      <div id="statusbar">
+        <span class="badge off" id="sb-device"
+          ><span class="dot"></span>No device</span
+        >
+        <span class="badge off" id="sb-attach"
+          ><span class="dot"></span>Not attached</span
+        >
+        <span class="badge info" id="sb-type">int32</span>
+        <span class="badge info" id="sb-candidates">0 candidates</span>
+        <span class="badge warn" id="sb-frozen" style="display: none"></span>
+        <span class="badge info" id="sb-undo" style="display: none"></span>
+      </div>
+    </div>
+
+    <div id="layout">
+      <!-- ── Sidebar ── -->
+      <aside>
+        <div class="nav-group">Connection</div>
+        <nav aria-label="Workspace sections">
+          <button type="button" class="active" data-panel="device">
+            <span class="icon">📱</span>Device
+          </button>
+          <button type="button" data-panel="process">
+            <span class="icon">⚙️</span>Process
+          </button>
+        </nav>
+        <div class="nav-group">Memory</div>
+        <nav>
+          <button type="button" data-panel="search">
+            <span class="icon">🔍</span>Search
+          </button>
+          <button type="button" data-panel="candidates">
+            <span class="icon">📋</span>Candidates
+          </button>
+          <button type="button" data-panel="memory">
+            <span class="icon">✏️</span>Modify
+          </button>
+          <button type="button" data-panel="pointer">
+            <span class="icon">🔗</span>Pointer Scan
+          </button>
+        </nav>
+        <div class="nav-group">Tools</div>
+        <nav>
+          <button type="button" data-panel="hex">
+            <span class="icon">🔢</span>Hex Viewer
+          </button>
+          <button type="button" data-panel="maps">
+            <span class="icon">🗺️</span>Maps
+          </button>
+          <button type="button" data-panel="watch">
+            <span class="icon">👁️</span>Watch
+          </button>
+          <button type="button" data-panel="bookmarks">
+            <span class="icon">🔖</span>Bookmarks
+          </button>
+          <button type="button" data-panel="session">
+            <span class="icon">💾</span>Session
+          </button>
+        </nav>
+      </aside>
+
+      <!-- ── Main ── -->
+      <main id="main">
+        <div id="workflow" aria-label="Setup progress">
+          <button type="button" data-panel="device" id="step-device">
+            <span class="step-number">1</span><span>Connect device</span
+            ><span class="step-detail" id="step-device-detail"
+              >Select an ADB target</span
+            >
+          </button>
+          <span class="step-divider" aria-hidden="true">→</span>
+          <button type="button" data-panel="process" id="step-process">
+            <span class="step-number">2</span><span>Attach process</span
+            ><span class="step-detail" id="step-process-detail"
+              >Choose a running app</span
+            >
+          </button>
+          <span class="step-divider" aria-hidden="true">→</span>
+          <button type="button" data-panel="search" id="step-search">
+            <span class="step-number">3</span><span>Search memory</span
+            ><span class="step-detail" id="step-search-detail"
+              >Find and refine values</span
+            >
+          </button>
+        </div>
+        <div id="connection-alert" class="notice" role="status" hidden></div>
+        <div id="content" tabindex="-1">
+          <!-- Device -->
+          <section class="panel active" id="panel-device" aria-label="Device">
+            <div class="page-heading">
+              <div class="eyebrow">CONNECTION</div>
+              <h1>Start with your device.</h1>
+              <p>
+                Connect an Android device with root access and USB debugging,
+                then choose a process to inspect.
+              </p>
+            </div>
+            <div class="grid2">
+              <div class="card">
+                <div class="card-title">Connected devices</div>
+                <p class="help">
+                  Authorize USB debugging on your device, then refresh this
+                  list.
+                </p>
+                <div class="row">
+                  <button class="btn" data-click="loadDevices">
+                    ↺ Refresh
+                  </button>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Serial</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="device-table">
+                      <tr>
+                        <td class="empty" colspan="2">Checking for devices…</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-title">Wi-Fi ADB</div>
+                <p class="help">
+                  Use the IP address and ADB port configured on your device.
+                </p>
+                <div class="row">
+                  <label class="field"
+                    ><span>Device address</span
+                    ><input
+                      id="wifi-addr"
+                      data-enter="connectWifi"
+                      placeholder="192.168.1.5:5555"
+                  /></label>
+                </div>
+                <div class="row">
+                  <button class="btn primary" data-click="connectWifi">
+                    Connect
+                  </button>
+                  <button class="btn danger" data-click="disconnectWifi">
+                    Disconnect
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Process -->
+          <section class="panel" id="panel-process" aria-label="Process">
+            <h1 class="page-title">Process</h1>
+            <p class="page-description">
+              Attach pauses the target. Use Continue to resume it while keeping
+              the process selected.
+            </p>
+            <div class="card">
+              <div class="card-title">Quick attach by name</div>
+              <div class="row">
+                <label class="field"
+                  ><span>Process name</span
+                  ><input
+                    id="proc-search"
+                    data-enter="searchProc"
+                    data-requires="device"
+                    placeholder="Process name (partial match)…"
+                /></label>
+                <button
+                  class="btn primary"
+                  data-click="searchProc"
+                  data-requires="device"
+                >
+                  Search &amp; Attach
+                </button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Manual</div>
+              <div class="row">
+                <label class="field" style="max-width: 120px"
+                  ><span>Process ID</span
+                  ><input
+                    id="attach-pid"
+                    data-enter="attachPID"
+                    data-requires="device"
+                    placeholder="PID"
+                /></label>
+                <button
+                  class="btn primary"
+                  data-click="attachPID"
+                  data-requires="device"
+                >
+                  Attach
+                </button>
+                <button
+                  class="btn danger"
+                  data-click="detach"
+                  data-requires="attached"
+                >
+                  Detach
+                </button>
+                <button
+                  class="btn"
+                  data-click="stopProc"
+                  data-requires="attached"
+                >
+                  ⏸ Stop
+                </button>
+                <button
+                  class="btn"
+                  data-click="continueProc"
+                  data-requires="attached"
+                >
+                  ▶ Continue
+                </button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Process list</div>
+              <div class="row">
+                <label class="field"
+                  ><span>Filter processes</span
+                  ><input
+                    id="proc-filter"
+                    placeholder="Filter by name…"
+                    data-input="filterProc"
+                /></label>
+                <button
+                  class="btn"
+                  data-click="loadProcessList"
+                  data-requires="device"
+                >
+                  ↺ Refresh
+                </button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>PID</th>
+                      <th>Name</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="proc-table">
+                    <tr>
+                      <td class="empty" colspan="3">
+                        Select a device to browse its processes.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- Search -->
+          <section class="panel" id="panel-search" aria-label="Search">
+            <h1 class="page-title">Search memory</h1>
+            <p class="page-description">
+              Scan for a value, change it in the app, then narrow the results
+              with a filter.
+            </p>
+            <div id="search-summary" class="result-summary" hidden>
+              <span id="search-summary-text"></span
+              ><button type="button" class="btn sm" data-panel="candidates">
+                View candidates →
+              </button>
+            </div>
+            <div class="card">
+              <div class="card-title">Value type</div>
+              <div class="row">
+                <label class="field" style="flex: 0 0 auto"
+                  ><span>Value type</span
+                  ><select id="value-type" data-change="setType">
+                    <option>int32</option>
+                    <option>int64</option>
+                    <option>float32</option>
+                    <option>float64</option>
+                    <option>uint32</option>
+                    <option>uint64</option>
+                    <option>bytes</option>
+                  </select></label
+                >
+                <span class="help"
+                  >Changing type clears existing candidates</span
+                >
+              </div>
+            </div>
+            <div class="grid2">
+              <div class="card">
+                <div class="card-title">Value search</div>
+                <div class="row">
+                  <label class="field"
+                    ><span>Value to find</span
+                    ><input
+                      id="search-val"
+                      data-enter="searchValue"
+                      data-requires="attached"
+                      placeholder="Value…"
+                  /></label>
+                  <button
+                    class="btn primary"
+                    data-click="searchValue"
+                    data-requires="attached"
+                  >
+                    Search
+                  </button>
+                </div>
+                <div class="row">
+                  <label class="field" style="flex: 0 0 auto"
+                    ><span>Memory region</span
+                    ><select data-change="regionChanged" id="search-region">
+                      <option value="">All regions</option>
+                      <option value="heap">Heap only</option>
+                      <option value="stack">Stack only</option>
+                      <option value="anon">Anon only</option>
+                      <option value="custom">Custom range</option>
+                    </select></label
+                  >
+                </div>
+                <div class="row" id="custom-region" hidden>
+                  <label class="field"
+                    ><span>Start address</span
+                    ><input id="region-start" placeholder="0x1000" /></label
+                  ><label class="field"
+                    ><span>End address</span
+                    ><input id="region-end" placeholder="0x2000"
+                  /></label>
+                </div>
+                <div class="row" style="margin-top: 4px">
+                  <button class="btn danger sm" data-click="searchReset">
+                    ✕ Reset session
+                  </button>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-title">Filter candidates</div>
+                <div class="btn-group" style="margin-bottom: 10px">
+                  <button
+                    class="btn sm"
+                    data-click="filter"
+                    data-requires="candidates"
+                    data-args='["changed"]'
+                  >
+                    Changed
+                  </button>
+                  <button
+                    class="btn sm"
+                    data-click="filter"
+                    data-requires="candidates"
+                    data-args='["unchanged"]'
+                  >
+                    Unchanged
+                  </button>
+                  <button
+                    class="btn sm"
+                    data-click="filter"
+                    data-requires="candidates"
+                    data-args='["increased"]'
+                  >
+                    Increased ↑
+                  </button>
+                  <button
+                    class="btn sm"
+                    data-click="filter"
+                    data-requires="candidates"
+                    data-args='["decreased"]'
+                  >
+                    Decreased ↓
+                  </button>
+                </div>
+                <div class="row">
+                  <label class="field"
+                    ><span>Current value</span
+                    ><input
+                      id="filter-val"
+                      data-enter="filterExact"
+                      data-requires="candidates"
+                      placeholder="Specific value…"
+                  /></label>
+                  <button
+                    class="btn sm"
+                    data-click="filter"
+                    data-requires="candidates"
+                    data-args='["value"]'
+                  >
+                    = Exact
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="grid2">
+              <div class="card">
+                <div class="card-title">Byte pattern</div>
+                <div class="row">
+                  <label class="field"
+                    ><span>Byte pattern</span
+                    ><input
+                      id="pattern-val"
+                      data-enter="searchPattern"
+                      data-requires="attached"
+                      placeholder="FF 00 ?? 01"
+                  /></label>
+                  <button
+                    class="btn"
+                    data-click="searchPattern"
+                    data-requires="attached"
+                  >
+                    Search
+                  </button>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-title">String search</div>
+                <div class="row">
+                  <label class="field"
+                    ><span>Text to find</span
+                    ><input
+                      id="string-val"
+                      data-enter="searchString"
+                      data-requires="attached"
+                      placeholder="String…"
+                  /></label>
+                  <label class="field" style="flex: 0 0 auto"
+                    ><span>Encoding</span
+                    ><select id="string-enc">
+                      <option value="utf8">UTF-8</option>
+                      <option value="utf16">UTF-16LE</option>
+                    </select></label
+                  >
+                  <button
+                    class="btn"
+                    data-click="searchString"
+                    data-requires="attached"
+                  >
+                    Search
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Candidates -->
+          <section class="panel" id="panel-candidates" aria-label="Candidates">
+            <h1 class="page-title">
+              <span class="icon">📋</span>Candidates
+              <span
+                id="cand-count"
+                style="
+                  font-size: 13px;
+                  color: var(--text2);
+                  font-weight: 400;
+                  margin-left: 4px;
+                "
+                >0</span
+              >
+            </h1>
+            <div class="card" style="padding: 12px 16px">
+              <div class="row" style="margin-bottom: 0">
+                <button class="btn" data-click="loadCandidates">
+                  ↺ Refresh
+                </button>
+                <button
+                  class="btn success"
+                  data-click="freezeAll"
+                  data-requires="candidates"
+                >
+                  ❄ Freeze All
+                </button>
+                <label class="field" style="flex: 0 0 auto; margin-left: auto"
+                  ><span>Results per page</span
+                  ><select
+                    id="cand-pagesize"
+                    data-change="loadCandidates"
+                    data-args="[0]"
+                  >
+                    <option value="50">50 / page</option>
+                    <option value="100" selected>100 / page</option>
+                    <option value="250">250 / page</option>
+                  </select></label
+                >
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Address</th>
+                    <th>Value</th>
+                    <th style="width: 250px"></th>
+                  </tr>
+                </thead>
+                <tbody id="cand-table">
+                  <tr>
+                    <td class="empty" colspan="3">
+                      Run a search to find candidate addresses.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div
+              class="row"
+              id="cand-pagination"
+              style="margin-top: 8px; display: none"
+            >
+              <button
+                class="btn sm"
+                id="cand-prev"
+                data-click="candPage"
+                data-args="[-1]"
+              >
+                ← Prev
+              </button>
+              <span
+                id="cand-pageinfo"
+                style="color: var(--text2); font-size: 12px; padding: 0 8px"
+              ></span>
+              <button
+                class="btn sm"
+                id="cand-next"
+                data-click="candPage"
+                data-args="[1]"
+              >
+                Next →
+              </button>
+            </div>
+          </section>
+
+          <!-- Memory -->
+          <section class="panel" id="panel-memory" aria-label="Memory">
+            <h1 class="page-title">
+              <span class="icon">✏️</span>Modify / Freeze
+            </h1>
+            <div class="grid2">
+              <div class="card">
+                <div class="card-title">Write value</div>
+                <div class="row">
+                  <label class="field"
+                    ><span>Address</span
+                    ><input id="mod-addr" placeholder="Address (hex)"
+                  /></label>
+                </div>
+                <div class="row">
+                  <label class="field"
+                    ><span>New value</span
+                    ><input
+                      id="mod-val"
+                      data-enter="memModify"
+                      data-requires="attached"
+                      placeholder="New value"
+                  /></label>
+                  <button
+                    class="btn primary"
+                    data-click="memModify"
+                    data-requires="attached"
+                  >
+                    Write
+                  </button>
+                  <button class="btn" data-click="memUndo" data-requires="undo">
+                    ↩ Undo
+                  </button>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-title">Freeze address</div>
+                <div class="row">
+                  <label class="field"
+                    ><span>Address</span
+                    ><input id="freeze-addr" placeholder="Address (hex)"
+                  /></label>
+                </div>
+                <div class="row">
+                  <label class="field"
+                    ><span>Value to hold</span
+                    ><input
+                      id="freeze-val"
+                      data-enter="memFreeze"
+                      data-requires="attached"
+                      placeholder="Value to hold"
+                  /></label>
+                  <button
+                    class="btn success"
+                    data-click="memFreeze"
+                    data-requires="attached"
+                  >
+                    ❄ Freeze
+                  </button>
+                </div>
+                <div class="row" style="margin-top: 4px">
+                  <label class="field"
+                    ><span>Address</span
+                    ><input
+                      id="unfreeze-addr"
+                      placeholder="Address to unfreeze (hex)"
+                  /></label>
+                  <button
+                    class="btn danger"
+                    data-click="memUnfreeze"
+                    data-requires="attached"
+                  >
+                    Unfreeze
+                  </button>
+                </div>
+                <div
+                  class="row"
+                  style="
+                    margin-top: 8px;
+                    border-top: 1px solid var(--border);
+                    padding-top: 8px;
+                  "
+                >
+                  <label class="field" style="max-width: 130px"
+                    ><span>Interval (ms)</span
+                    ><input
+                      id="freeze-interval"
+                      placeholder="Interval ms [100]"
+                  /></label>
+                  <button class="btn sm" data-click="setFreezeInterval">
+                    Set interval
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Frozen addresses</div>
+              <div class="row">
+                <button class="btn" data-click="loadFrozen">↺ Refresh</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Address</th>
+                      <th style="width: 120px"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="frozen-table">
+                    <tr>
+                      <td class="empty" colspan="2">None frozen</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- Pointer Scan -->
+          <section class="panel" id="panel-pointer" aria-label="Pointer">
+            <h1 class="page-title"><span class="icon">🔗</span>Pointer Scan</h1>
+            <div class="card">
+              <div class="card-title">Parameters</div>
+              <div class="row">
+                <label class="field"
+                  ><span>Target address</span
+                  ><input id="ptr-addr" placeholder="Target address (0x…)"
+                /></label>
+                <label class="field" style="max-width: 140px"
+                  ><span>Maximum depth</span
+                  ><input id="ptr-depth" placeholder="Max depth [5]"
+                /></label>
+                <label class="field" style="max-width: 150px"
+                  ><span>Maximum offset</span
+                  ><input id="ptr-offset" placeholder="Max offset [0x800]"
+                /></label>
+                <button
+                  class="btn primary"
+                  data-click="runPointerScan"
+                  data-requires="attached"
+                >
+                  ▶ Scan
+                </button>
+              </div>
+              <p
+                style="color: var(--text3); font-size: 11.5px; margin-top: 4px"
+              >
+                May take 30–60 s on large processes.
+              </p>
+            </div>
+            <div class="card" style="padding: 12px">
+              <div class="card-title">Results (tree view)</div>
+              <div id="ptr-tree" style="font-size: 12.5px; line-height: 1.8">
+                <span class="empty"
+                  >Enter a target address and scan for stable pointer
+                  paths.</span
+                >
+              </div>
+            </div>
+          </section>
+
+          <!-- Hex Viewer -->
+          <section class="panel" id="panel-hex" aria-label="Hex">
+            <h1 class="page-title"><span class="icon">🔢</span>Hex Viewer</h1>
+            <div class="card">
+              <div class="card-title">Read memory</div>
+              <div class="row">
+                <label class="field"
+                  ><span>Start address</span
+                  ><input
+                    id="hex-addr"
+                    data-enter="loadHexdump"
+                    data-requires="attached"
+                    placeholder="Address (0x…)"
+                /></label>
+                <label class="field" style="max-width: 120px"
+                  ><span>Size (bytes)</span
+                  ><input id="hex-size" placeholder="Size [256]"
+                /></label>
+                <button
+                  class="btn primary"
+                  data-click="loadHexdump"
+                  data-requires="attached"
+                >
+                  Load
+                </button>
+              </div>
+            </div>
+            <div class="card" style="padding: 12px">
+              <pre
+                id="hex-output"
+                style="
+                  font-size: 12px;
+                  line-height: 1.6;
+                  overflow-x: auto;
+                  color: var(--text);
+                  margin: 0;
+                  white-space: pre;
+                "
+              >
+Enter an address to preview memory in hex and ASCII.</pre
+              >
+            </div>
+          </section>
+
+          <!-- Maps -->
+          <section class="panel" id="panel-maps" aria-label="Maps">
+            <h1 class="page-title"><span class="icon">🗺️</span>Memory Maps</h1>
+            <div class="card" style="padding: 12px 16px">
+              <div class="row" style="margin-bottom: 0">
+                <label class="field"
+                  ><span>Filter maps</span
+                  ><input
+                    id="maps-filter"
+                    placeholder="Filter by name…"
+                    data-input="filterMaps"
+                /></label>
+                <button
+                  class="btn"
+                  data-click="loadMaps"
+                  data-requires="attached"
+                >
+                  ↺ Refresh
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Size</th>
+                    <th>Name</th>
+                    <th style="width: 100px"></th>
+                  </tr>
+                </thead>
+                <tbody id="maps-table">
+                  <tr>
+                    <td class="empty" colspan="5">
+                      Attach a process to inspect its memory regions.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Watch -->
+          <section class="panel" id="panel-watch" aria-label="Watch">
+            <h1 class="page-title">
+              Live watch
+              <span id="watch-state" class="badge off">Connecting…</span>
+            </h1>
+            <div class="card" style="padding: 12px 16px; margin-bottom: 12px">
+              <div class="row" style="margin-bottom: 0">
+                <span style="color: var(--text2); font-size: 12px"
+                  >Value changes appear below in real time via WebSocket.</span
+                >
+                <button
+                  class="btn danger sm"
+                  style="margin-left: auto"
+                  data-click="clearWatch"
+                >
+                  ✕ Clear
+                </button>
+              </div>
+            </div>
+            <div id="watch-log">
+              <div class="empty" style="padding: 16px">Waiting for events…</div>
+            </div>
+          </section>
+
+          <!-- Bookmarks -->
+          <section class="panel" id="panel-bookmarks" aria-label="Bookmarks">
+            <h1 class="page-title"><span class="icon">🔖</span>Bookmarks</h1>
+            <div class="card">
+              <div class="card-title">Add bookmark</div>
+              <div class="row">
+                <label class="field"
+                  ><span>Address</span
+                  ><input id="bm-addr" placeholder="Address (hex)"
+                /></label>
+                <label class="field"
+                  ><span>Label</span
+                  ><input
+                    id="bm-label"
+                    data-enter="bmAdd"
+                    data-requires="attached"
+                    placeholder="Label"
+                /></label>
+                <button
+                  class="btn primary"
+                  data-click="bmAdd"
+                  data-requires="attached"
+                >
+                  + Add
+                </button>
+                <button class="btn" data-click="loadBookmarks">
+                  ↺ Refresh
+                </button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-title">Modify all (matching current type)</div>
+              <div class="row">
+                <label class="field"
+                  ><span>New value</span
+                  ><input id="bm-modval" placeholder="Value…"
+                /></label>
+                <button
+                  class="btn success"
+                  data-click="bmModifyAll"
+                  data-requires="attached"
+                >
+                  Write All
+                </button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Address</th>
+                    <th>Label</th>
+                    <th>Type</th>
+                    <th>Value</th>
+                    <th style="width: 90px"></th>
+                  </tr>
+                </thead>
+                <tbody id="bm-table">
+                  <tr>
+                    <td class="empty" colspan="6">No bookmarks</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Session -->
+          <section class="panel" id="panel-session" aria-label="Session">
+            <h1 class="page-title">
+              <span class="icon">💾</span>Save / Load Session
+            </h1>
+            <div class="card">
+              <div class="card-title">State file (bookmarks + candidates)</div>
+              <div class="row">
+                <label class="field"
+                  ><span>File path</span
+                  ><input id="sess-path" placeholder="memdroid.json"
+                /></label>
+                <button class="btn primary" data-click="sessSave">
+                  💾 Save
+                </button>
+                <button class="btn" data-click="sessLoad">📂 Load</button>
+              </div>
+              <p
+                style="color: var(--text3); font-size: 11.5px; margin-top: 8px"
+              >
+                Session file path is relative to where memdroid was started.
+              </p>
+            </div>
+          </section>
+        </div>
+        <!-- #content -->
+
+        <!-- ── Log bar ── -->
+        <div class="activity-header">
+          <span>Activity</span
+          ><span id="activity-state" role="status">Ready</span
+          ><button type="button" class="text-button" data-click="clearLog">
+            Clear
+          </button>
+        </div>
+        <div id="log" role="log" aria-label="Activity history"></div>
+        <div id="notifications" aria-live="polite" aria-atomic="false"></div>
+      </main>
+      <!-- #main -->
+    </div>
+    <!-- #layout -->
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 
 	"memdroid/internal/app"
 	"memdroid/internal/memory/store"
@@ -35,4 +36,34 @@ func ImportCT(st *app.State) {
 		bl.Add(b.Addr, b.Label, b.VType)
 	}
 	fmt.Printf("Imported %d bookmarks from %s\n", len(bookmarks), path)
+}
+
+func addBookmark(c *cmd) {
+	addr, ok := ParseAddr("Address (hex): ")
+	if !ok {
+		return
+	}
+	c.st.GetBookmarks().Add(addr, Prompt("Label: "), c.vt)
+	fmt.Printf("Bookmarked 0x%x\n", addr)
+}
+
+func modifyAllBookmarks(c *cmd) {
+	val, ok := ParseValue("Value: ", c.vt)
+	if !ok {
+		return
+	}
+	count := c.st.GetBookmarks().ModifyAll(c.drv, c.pid, val, c.vt)
+	fmt.Printf("Modified %d bookmarks\n", count)
+}
+
+func removeBookmark(c *cmd) {
+	BookmarkList(c.st)
+	idx, err := strconv.Atoi(Prompt("Index to remove: "))
+	if err != nil {
+		fmt.Println("Invalid index")
+		return
+	}
+	if err := c.st.GetBookmarks().Remove(idx); err != nil {
+		fmt.Printf("Remove: %v\n", err)
+	}
 }

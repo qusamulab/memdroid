@@ -5,17 +5,15 @@ import (
 	"strconv"
 
 	"memdroid/internal/app"
+	"memdroid/internal/driver"
 	"memdroid/internal/driver/adb"
 )
 
 func doAttach(st *app.State, pid int, name string) {
-	if err := st.GetDriver().Attach(pid); err != nil {
+	if err := st.Attach(pid, name); err != nil {
 		fmt.Printf("Attach failed: %v\n", err)
 		return
 	}
-	st.SetPID(pid)
-	st.AddAttached(pid, name)
-	st.NewSession(pid)
 	if name != "" {
 		fmt.Printf("Attached to %s (PID %d)\n", name, pid)
 	} else {
@@ -86,8 +84,10 @@ func SwitchProcess(st *app.State) {
 		return
 	}
 	target := procs[idx-1]
-	st.SetPID(target.PID)
-	st.NewSession(target.PID)
+	if err := st.SwitchProcess(target.PID); err != nil {
+		fmt.Printf("Switch failed: %v\n", err)
+		return
+	}
 	fmt.Printf("Active process: PID %d (%s)\n", target.PID, processName(target.Name))
 }
 
@@ -118,4 +118,15 @@ func processName(name string) string {
 		return "(unknown)"
 	}
 	return name
+}
+
+func listProcesses(drv driver.Driver) {
+	procs, err := drv.ListProcesses()
+	if err != nil {
+		fmt.Printf("List failed: %v\n", err)
+		return
+	}
+	for _, p := range procs {
+		fmt.Printf("PID: %5d  Name: %s\n", p.PID, p.Name)
+	}
 }
