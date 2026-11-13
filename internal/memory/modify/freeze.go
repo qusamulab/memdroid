@@ -1,6 +1,8 @@
 package modify
 
 import (
+	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -44,27 +46,38 @@ func (f *Freezer) GetInterval() time.Duration {
 // Freeze starts a goroutine that repeatedly writes value to addr at the
 // configured interval. Returns an error if addr is already frozen.
 func (f *Freezer) Freeze(drv driver.Driver, pid int, addr uintptr, value []byte) error {
+	if len(value) == 0 || len(value) > 64<<10 {
+		return fmt.Errorf("freeze value must contain 1-65536 bytes")
+	}
 	val := make([]byte, len(value))
 	copy(val, value)
 	iv := f.GetInterval()
+	if iv <= 0 {
+		return fmt.Errorf("freeze interval must be positive")
+	}
 
-	return f.pool.Start(addr, func(stop <-chan struct{}) {
-		poller.EveryTick(iv, stop, func() {
+	return f.pool.StartContext(driver.Context(drv), addr, func(ctx context.Context) {
+		drv = driver.WithContext(drv, ctx)
+		f.pool.Every(ctx, iv, func() {
 			_ = drv.Poke(pid, addr, val)
 		})
 	})
 }
 
 // FreezeAllCandidates freezes every address in the session with its last-seen value.
-func (f *Freezer) FreezeAllCandidates(drv driver.Driver, s *search.Session) int {
+func (f *Freezer) FreezeAllCandidates(drv driver.Driver, s *search.Session) (int, error) {
+	if s.CandidateCount()+len(f.List()) > poller.MaxTasks {
+		return 0, fmt.Errorf("freeze limit (%d) exceeded; narrow the candidates", poller.MaxTasks)
+	}
 	pid := s.PID()
 	count := 0
 	for addr, val := range s.Snapshot() {
-		if f.Freeze(drv, pid, addr, val) == nil {
-			count++
+		if err := f.Freeze(drv, pid, addr, val); err != nil {
+			return count, err
 		}
+		count++
 	}
-	return count
+	return count, nil
 }
 
 // Unfreeze stops the freeze goroutine for addr.

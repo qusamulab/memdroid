@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"memdroid/internal/app"
 	"memdroid/internal/cli"
@@ -51,15 +55,20 @@ func run() error {
 		fmt.Printf("Auth token required — open %s/?token=<token>\n", server.DisplayURL(*addr))
 	}
 
-	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "HTTP server error: %v\n", err)
-		}
-	}()
-
-	cli.Run(st, d, server.DisplayURL(*addr))
-
-	return srv.Shutdown()
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	serverDone := make(chan error, 1)
+	go func() { serverDone <- srv.ListenAndServe() }()
+	cliDone := make(chan struct{})
+	go func() { cli.Run(st, d, server.DisplayURL(*addr)); close(cliDone) }()
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case <-cliDone:
+	case runErr = <-serverDone:
+	}
+	closeErr := st.Close()
+	return errors.Join(runErr, closeErr, srv.Shutdown())
 }
 
 func autoSelectDevice(d *adb.ADB) {

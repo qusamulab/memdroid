@@ -1,99 +1,139 @@
-// Package poller provides a small keyed goroutine manager shared by the
-// freeze/watch/alert subsystems. Each of those used to carry its own copy of
-// "map[uintptr]*entry + stop channel + List/Stop/StopAll" boilerplate; they now
-// delegate that lifecycle management to a single Pool.
+// Package poller manages bounded, cancellable background tasks.
 package poller
 
 import (
+	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
 
-// Pool manages a set of background tasks keyed by address. Each task runs on its
-// own goroutine and stops when its stop channel is closed.
+const MaxTasks = 128
+
+type task struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+}
 type Pool struct {
-	mu    sync.Mutex
-	tasks map[uintptr]chan struct{}
+	mu       sync.Mutex
+	tasks    map[uintptr]*task
+	stopping int
+	io       chan struct{}
 }
 
-// New returns an empty Pool.
-func New() *Pool {
-	return &Pool{tasks: make(map[uintptr]chan struct{})}
+func New() *Pool { return &Pool{tasks: make(map[uintptr]*task), io: make(chan struct{}, 8)} }
+func (p *Pool) Start(key uintptr, run func(<-chan struct{})) error {
+	return p.StartContext(context.Background(), key, func(ctx context.Context) { run(ctx.Done()) })
 }
 
-// Start launches run on a new goroutine associated with key. run must return
-// when its stop channel is closed. Start returns an error if key is already
-// running.
-func (p *Pool) Start(key uintptr, run func(stop <-chan struct{})) error {
-	p.mu.Lock()
-	if _, exists := p.tasks[key]; exists {
-		p.mu.Unlock()
-		return fmt.Errorf("0x%x is already active", key)
-	}
-	stop := make(chan struct{})
-	p.tasks[key] = stop
-	p.mu.Unlock()
-
-	go run(stop)
-	return nil
-}
-
-// Stop stops the task for key. Returns an error if key is not running.
-func (p *Pool) Stop(key uintptr) error {
+// StartContext inherits the attachment lifetime. Completed tasks remove their
+// own registration, while Stop keeps the key reserved until the worker exits.
+func (p *Pool) StartContext(parent context.Context, key uintptr, run func(context.Context)) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	stop, ok := p.tasks[key]
+	if err := parent.Err(); err != nil {
+		return err
+	}
+	if p.stopping > 0 {
+		return fmt.Errorf("background tasks are stopping")
+	}
+	if _, ok := p.tasks[key]; ok {
+		return fmt.Errorf("0x%x is already active", key)
+	}
+	if len(p.tasks) >= MaxTasks {
+		return fmt.Errorf("background task limit (%d) reached", MaxTasks)
+	}
+	ctx, cancel := context.WithCancel(parent)
+	t := &task{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	p.tasks[key] = t
+	go func() {
+		defer func() { cancel(); p.mu.Lock(); delete(p.tasks, key); close(t.done); p.mu.Unlock() }()
+		run(ctx)
+	}()
+	return nil
+}
+func (p *Pool) Stop(key uintptr) error {
+	p.mu.Lock()
+	t, ok := p.tasks[key]
+	p.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("0x%x is not active", key)
 	}
-	close(stop)
-	delete(p.tasks, key)
+	t.cancel()
+	<-t.done
 	return nil
 }
-
-// StopAll stops every running task.
 func (p *Pool) StopAll() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	for key, stop := range p.tasks {
-		close(stop)
-		delete(p.tasks, key)
+	p.stopping++
+	tasks := make([]*task, 0, len(p.tasks))
+	for _, t := range p.tasks {
+		t.cancel()
+		tasks = append(tasks, t)
 	}
+	p.mu.Unlock()
+	for _, t := range tasks {
+		<-t.done
+	}
+	p.mu.Lock()
+	p.stopping--
+	p.mu.Unlock()
 }
-
-// Has reports whether key is currently running.
 func (p *Pool) Has(key uintptr) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_, ok := p.tasks[key]
 	return ok
 }
-
-// List returns all active keys, sorted ascending.
 func (p *Pool) List() []uintptr {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	keys := make([]uintptr, 0, len(p.tasks))
-	for key := range p.tasks {
-		keys = append(keys, key)
+	for k := range p.tasks {
+		keys = append(keys, k)
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 	return keys
 }
 
-// EveryTick invokes onTick on each interval until stop is closed. It is a helper
-// for building run functions passed to Start.
+// Every bounds simultaneous I/O and checks cancellation again after a tick or
+// a semaphore wait, so cancellation cannot schedule a final unwanted write.
+func (p *Pool) Every(ctx context.Context, interval time.Duration, onTick func()) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case p.io <- struct{}{}:
+		}
+		if ctx.Err() == nil {
+			onTick()
+		}
+		<-p.io
+	}
+}
 func EveryTick(interval time.Duration, stop <-chan struct{}, onTick func()) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ticker.C:
-			onTick()
 		case <-stop:
 			return
+		case <-ticker.C:
+		}
+		select {
+		case <-stop:
+			return
+		default:
+			onTick()
 		}
 	}
 }

@@ -13,15 +13,18 @@ import (
 // State is the single shared mutable state of the tool.
 // Both the CLI and HTTP server read/write through this struct.
 type State struct {
-	processMu sync.Mutex // serializes attach, switch and detach across CLI/API
-	mu        sync.RWMutex
-	drv       driver.Driver
-	pid       int
-	valueType search.ValueType
-	session   *search.Session
-	bookmarks *store.BookmarkList
-	snapshots *snapshotStore
-	attached  map[int]string // pid -> name, all currently attached processes
+	processMu  sync.Mutex // serializes attach, switch and detach across CLI/API
+	mu         sync.RWMutex
+	target     *targetDriver
+	closed     bool
+	identities map[int]string
+	drv        driver.Driver
+	pid        int
+	valueType  search.ValueType
+	session    *search.Session
+	bookmarks  *store.BookmarkList
+	snapshots  *snapshotStore
+	attached   map[int]string // pid -> name, all currently attached processes
 
 	Freezer      *modify.Freezer
 	UndoStack    *modify.UndoStack
@@ -32,6 +35,7 @@ type State struct {
 func NewState(drv driver.Driver) *State {
 	return &State{
 		drv:          drv,
+		identities:   make(map[int]string),
 		valueType:    search.TypeInt32,
 		bookmarks:    store.NewBookmarkList(),
 		snapshots:    newSnapshotStore(maxSnapshotBytes),
@@ -48,7 +52,12 @@ func NewState(drv driver.Driver) *State {
 func (s *State) GetDriver() driver.Driver {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.drv
+	if s.target != nil {
+		return s.target
+	}
+	inactive := newTarget(s.drv, 0)
+	inactive.lease.cancel()
+	return inactive
 }
 
 // --- Bookmarks ---

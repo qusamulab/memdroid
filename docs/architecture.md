@@ -22,7 +22,9 @@ cmd/memdroid/
 internal/
 ├── app/
 │   ├── state.go            # Shared state and subsystem construction
-│   ├── process.go          # Attach/switch/detach lifecycle shared by CLI/API
+│   ├── process.go          # Attach/switch/detach/close shared by CLI/API
+│   ├── capture.go          # Coherent operation targets
+│   ├── target.go           # Revocable, process-bound driver access
 │   ├── session.go          # Search session and active value type
 │   ├── persistence.go      # Save/load and live-driver rebinding
 │   └── snapshots.go        # Bounded region snapshot storage
@@ -82,8 +84,15 @@ Feature handlers live beside related commands rather than in the menu loop.
 
 Both CLI and API call `app.State.Attach`, `SwitchProcess`, `Detach`, `Save` and
 `Load`. Process transitions are serialized independently of the state read
-lock, keeping slow device I/O from blocking status reads. A loaded session is
-rebound to the live driver before either frontend can use it.
+lock, keeping slow device I/O from blocking status reads. `State.Capture` returns
+one PID/type/session/driver snapshot. Each attachment has a cancellable driver
+lease; transitions revoke the old lease and join I/O and background tasks.
+Switching the active process also clears its undo history and region snapshots.
+
+`State.Close` rejects new attachments and resumes every attached PID. Failed
+resumes remain tracked for retry. Normal CLI exit, EOF, SIGINT and SIGTERM use
+this cleanup. A loaded session must match the attached device, boot ID, PID and
+process start time before either bookmarks or candidates are published.
 
 ## Web UI Boundaries
 
@@ -132,7 +141,7 @@ straightforward to add a local ptrace backend in the future.
 type Driver interface {
     ListProcesses() ([]ProcessInfo, error)
     Attach(pid int) error
-    Detach(pid int)
+    Detach(pid int) error
     Peek(pid int, addr uintptr, size int) ([]byte, error)
     Poke(pid int, addr uintptr, data []byte) error
     ReadMaps(pid int) ([]Region, error)
@@ -162,7 +171,7 @@ from the host side over ADB.
 Both the CLI goroutine and all HTTP handler goroutines read/write through it.
 
 ```
-State.GetDriver()     → current ADB driver
+State.GetDriver()     → revocable driver for the active target
 State.GetSession()    → current search session (nil if not attached)
 State.GetPID()        → attached PID (0 if none)
 State.NewSession(pid) → replace the session with a fresh one
@@ -170,7 +179,9 @@ State.EnsureSession() → creates session if nil
 State.Attach(pid, n)  → attach, activate and create a fresh session
 State.SwitchProcess(p)→ validate and activate an attached process
 State.Detach()        → unfreeze/unwatch, detach, promote the next process
-State.Save/Load(path) → persist and restore with the live driver
+State.Save/Load(path) → persist and validate against the live process identity
+State.Capture()      → coherent PID/type/session/driver snapshot
+State.Close()        → cancel work and resume every attached process
 ```
 
 `State.Detach()` exists because the CLI and the API both need exactly that
@@ -192,7 +203,9 @@ the API updated `State` while the session kept scanning at the old width.
 
 `Session` holds `map[uintptr][]byte` (address → last-seen value bytes). All
 fields are unexported and mutex-guarded; long scans do their I/O without
-holding the lock and take it only to swap in the finished result.
+holding the lock. Only one scan/filter mutates a session at a time; finished
+results are published only if the captured revision remains current. Reset,
+type changes, restored sessions and process transitions invalidate old results.
 
 ```
 Session.Search(target)               → full scan, reset candidate map
@@ -236,19 +249,16 @@ server — gets its own client set.
 
 ### Freeze / Watch Goroutines
 
-Both use the ticker+stop-channel pattern:
+Each task inherits the attachment context and owns a cancellation function
+and completion channel. Stop/StopAll cancel tasks, then wait outside the pool
+lock for workers to exit. Registrations during StopAll are rejected. Periodic
+I/O checks cancellation after acquiring its semaphore and binds ADB subprocesses
+to the task context. Each pool caps tasks at 128 and simultaneous I/O at eight.
 
-```go
-ticker := time.NewTicker(interval)
-for {
-    select {
-    case <-ticker.C:  /* do work */
-    case <-e.stop:    return
-    }
-}
-```
-
-`UnfreezeAll` / `UnwatchAll` close all stop channels. These are called on detach and exit.
+Detach and exit cancel attachment access before stopping workers, so a late
+registration cannot survive the transition. ADB commands also have a 30-second
+timeout. The ADB manager rejects device changes while any PID is attached;
+operation bindings retain their original serial.
 
 ### The Shared Scan Engine
 
@@ -271,10 +281,15 @@ Two details the engine handles so callers don't have to:
   the *region* base, not the chunk base, so chunking cannot shift which offsets
   a scan visits.
 
-`Filter` works the other way round: it builds a region → `[]byte` cache from
-`ReadMaps`, binary-searches each candidate into its region, slices the current
-bytes out in memory, and falls back to `Peek` only for addresses whose region
-is missing (unmapped since the scan, or failed to read).
+`Filter` sorts candidates into their regions, reads at most a 32 MiB window
+at a time, and releases old windows as it advances. A single candidate in a
+multi-gigabyte mapping no longer allocates the whole mapping. Failed bulk reads
+fall back to `Peek` for the affected candidates.
+
+Value scans retain at most 100,000 candidates within a 16 MiB payload budget,
+plus one overflow probe. Limit reservations happen before cloning each match.
+Search and filter responses expose `truncated`; filtering an incomplete set
+preserves that flag. Freeze-all rejects sets above the 128-task limit.
 
 ### Pattern & String Search
 
@@ -306,3 +321,9 @@ point of that flag.
 ## API Reference
 
 See [docs/api.md](api.md) for the full REST + WebSocket endpoint list.
+
+## Design Review
+
+See [the review and resolution record](design-review.md) for the seven lifecycle
+and resource-control issues addressed by these boundaries and their regression
+coverage.

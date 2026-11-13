@@ -10,6 +10,10 @@ import (
 )
 
 func PointerScan(st *app.State) {
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
 	addr, ok := ParseAddr("Target address (hex): ")
 	if !ok {
 		return
@@ -29,7 +33,7 @@ func PointerScan(st *app.State) {
 		}
 	}
 	fmt.Println("Scanning... (this may take a while)")
-	result, err := pointer.Scan(st.GetDriver(), st.GetPID(), addr, maxDepth, maxOffset)
+	result, err := pointer.Scan(target.Driver, target.PID, addr, maxDepth, maxOffset)
 	if err != nil {
 		fmt.Printf("Pointer scan failed: %v\n", err)
 		return
@@ -45,6 +49,10 @@ func PointerScan(st *app.State) {
 }
 
 func PointerResolve(st *app.State) {
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
 	label := Prompt("Module name (e.g. libil2cpp.so): ")
 	if label == "" {
 		fmt.Println("Module name required")
@@ -74,7 +82,7 @@ func PointerResolve(st *app.State) {
 		BaseOffset: baseOffset,
 		Offsets:    offsets,
 	}
-	resolved, err := pointer.ResolveChain(st.GetDriver(), st.GetPID(), chain)
+	resolved, err := pointer.ResolveChain(target.Driver, target.PID, chain)
 	if err != nil {
 		fmt.Printf("Resolve failed: %v\n", err)
 		return

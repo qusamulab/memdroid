@@ -56,5 +56,6 @@ nav:
   - Reference:
       - API: api.md
       - Architecture: architecture.md
+      - Design Review: design-review.md
   - Contributing:
       - Development: development.md

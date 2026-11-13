@@ -146,9 +146,18 @@ p → Pattern: FF 00 ?? 01
 
 ```
 28 → Save State → memdroid.json
---- next session ---
+--- attach the same still-running process if needed ---
 29 → Load State → memdroid.json
 ```
+
+Restoring candidates requires the same device and still-running process.
+Restarting the process or device requires a new scan. Old files without process
+identity can still supply bookmarks when they contain no saved candidates.
+Detach all processes before changing devices. Switching processes clears Undo,
+region snapshots and background tasks for the previous active process.
+
+Searches report when the candidate limit is reached; narrow the value or region
+and scan again for a complete result. Freeze-all supports up to 128 addresses.
 
 ## Value Types
 

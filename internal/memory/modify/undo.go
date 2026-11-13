@@ -19,6 +19,7 @@ type undoEntry struct {
 // UndoStack records previous values so writes can be reverted. It is safe for
 // concurrent use.
 type UndoStack struct {
+	opMu    sync.Mutex
 	mu      sync.Mutex
 	entries []undoEntry
 }
@@ -29,6 +30,8 @@ func NewUndoStack() *UndoStack {
 
 // WithUndo writes value to addr, saving the previous value for Undo.
 func (u *UndoStack) WithUndo(drv driver.Driver, pid int, addr uintptr, value []byte) error {
+	u.opMu.Lock()
+	defer u.opMu.Unlock()
 	prev, err := drv.Peek(pid, addr, len(value))
 	if err != nil {
 		return err
@@ -47,16 +50,22 @@ func (u *UndoStack) WithUndo(drv driver.Driver, pid int, addr uintptr, value []b
 
 // Undo reverts the most recent WithUndo. Returns an error if the stack is empty.
 func (u *UndoStack) Undo() error {
+	u.opMu.Lock()
+	defer u.opMu.Unlock()
 	u.mu.Lock()
 	if len(u.entries) == 0 {
 		u.mu.Unlock()
 		return fmt.Errorf("nothing to undo")
 	}
 	e := u.entries[len(u.entries)-1]
+	u.mu.Unlock()
+	if err := e.drv.Poke(e.pid, e.addr, e.value); err != nil {
+		return err
+	}
+	u.mu.Lock()
 	u.entries = u.entries[:len(u.entries)-1]
 	u.mu.Unlock()
-
-	return e.drv.Poke(e.pid, e.addr, e.value)
+	return nil
 }
 
 // Depth returns how many undo steps are available.
@@ -68,6 +77,8 @@ func (u *UndoStack) Depth() int {
 
 // Clear discards the undo history.
 func (u *UndoStack) Clear() {
+	u.opMu.Lock()
+	defer u.opMu.Unlock()
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.entries = nil

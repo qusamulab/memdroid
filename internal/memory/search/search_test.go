@@ -240,8 +240,8 @@ func TestSearchReadErrorYieldsNoCandidates(t *testing.T) {
 func TestSearchEmptyByteTarget(t *testing.T) {
 	f := drivertest.New(drivertest.Region{Start: 0x1000, Name: "[heap]", Data: regionData(16, nil)})
 	s := NewSession(1, TypeBytes, f)
-	if err := s.Search(nil); err != nil {
-		t.Fatalf("Search: %v", err)
+	if err := s.Search(nil); err == nil {
+		t.Fatal("empty target must be rejected")
 	}
 	if got := s.CandidateCount(); got != 0 {
 		t.Errorf("CandidateCount() = %d, want 0 for a zero-width target", got)

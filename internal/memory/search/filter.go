@@ -5,7 +5,6 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
-	"sync"
 
 	"memdroid/internal/driver"
 )
@@ -30,20 +29,15 @@ func (s *Session) Filter(mode FilterMode, target []byte) error {
 	if !mode.valid() {
 		return fmt.Errorf("invalid filter mode %d", mode)
 	}
-	// Distinguish "never searched" from "searched and found nothing" — both
-	// leave HasCandidates false, but they call for different fixes.
-	if !s.Searched() {
-		return fmt.Errorf("no active search session")
+	op, err := s.begin(true)
+	if err != nil {
+		return err
 	}
-	if !s.HasCandidates() {
-		return fmt.Errorf("no candidates remain to filter")
-	}
+	defer op.finish()
+	pid, vt, drv := op.pid, op.vt, op.drv
 	if mode == FilterValue && len(target) == 0 {
 		return fmt.Errorf("filter %q requires a target value", mode)
 	}
-
-	pid, vt, drv := s.scanContext()
-	width := s.candidateWidth()
 
 	regions, err := drv.ReadMaps(pid)
 	if err != nil {
@@ -51,23 +45,38 @@ func (s *Session) Filter(mode FilterMode, target []byte) error {
 	}
 	slices.SortFunc(regions, func(a, b driver.Region) int { return cmp.Compare(a.Start, b.Start) })
 
-	snap := s.Snapshot()
-	entries, needed := planFilterReads(snap, regions)
-	cache := readRegions(drv, pid, regions, needed)
-
+	entries, _ := planFilterReads(op.candidates, regions)
 	next := make(map[uintptr][]byte, len(entries))
+	// Entries are sorted. Retain only one bounded window, releasing each buffer
+	// as soon as its candidates have been consumed, including across regions.
+	var buf []byte
+	var base uintptr
+	cachedRegion := -1
 	for _, e := range entries {
-		sz := width
-		if vt == TypeBytes {
-			sz = len(e.prev)
+		if op.ctx.Err() != nil {
+			return ErrSearchConflict
 		}
-
-		cur := sliceFromCache(cache, regions, e.regIdx, e.addr, sz)
+		sz := len(e.prev)
+		if vt != TypeBytes {
+			sz = vt.Size()
+		}
+		var cur []byte
+		if e.regIdx >= 0 {
+			if cachedRegion != e.regIdx || e.addr < base || e.addr-base+uintptr(sz) > uintptr(len(buf)) {
+				base = e.addr
+				cachedRegion = e.regIdx
+				r := regions[e.regIdx]
+				n := min(scanChunkBytes, int(r.End-base))
+				buf, _ = drv.ReadRegion(pid, base, n)
+			}
+			off := int(e.addr - base)
+			if off >= 0 && off+sz <= len(buf) {
+				cur = buf[off : off+sz]
+			}
+		}
 		if cur == nil {
-			// Address fell outside every cached region (unmapped since the last
-			// scan, or its region failed to read) — fall back to a point read.
 			c, readErr := drv.Peek(pid, e.addr, sz)
-			if readErr != nil {
+			if readErr != nil || len(c) != sz {
 				continue
 			}
 			cur = c
@@ -78,8 +87,7 @@ func (s *Session) Filter(mode FilterMode, target []byte) error {
 		}
 	}
 
-	s.replace(next)
-	return nil
+	return op.commit(vt, next, op.truncated)
 }
 
 // candEntry pairs a candidate with the index of the region containing it.
@@ -119,51 +127,6 @@ func planFilterReads(snap map[uintptr][]byte, regions []driver.Region) (entries 
 	}
 	slices.SortFunc(entries, func(a, b candEntry) int { return cmp.Compare(a.addr, b.addr) })
 	return entries, needed
-}
-
-// readRegions bulk-loads the requested regions in parallel. Regions that fail
-// to read are simply absent from the result.
-func readRegions(drv driver.Driver, pid int, regions []driver.Region, needed map[int]struct{}) map[int][]byte {
-	cache := make(map[int][]byte, len(needed))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, scanWorkers)
-
-	for idx := range needed {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }()
-			r := regions[idx]
-			buf, err := drv.ReadRegion(pid, r.Start, int(r.End-r.Start))
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			cache[idx] = buf
-			mu.Unlock()
-		}()
-	}
-	wg.Wait()
-	return cache
-}
-
-// sliceFromCache returns the sz bytes at addr from the cached region buffer, or
-// nil if the region was not cached or the slice would fall out of bounds.
-func sliceFromCache(cache map[int][]byte, regions []driver.Region, idx int, addr uintptr, sz int) []byte {
-	if idx < 0 {
-		return nil
-	}
-	buf, ok := cache[idx]
-	if !ok {
-		return nil
-	}
-	off := int(addr - regions[idx].Start)
-	if off < 0 || off+sz > len(buf) {
-		return nil
-	}
-	return buf[off : off+sz]
 }
 
 func filterKeep(mode FilterMode, cur, prev, target []byte, vt ValueType) bool {

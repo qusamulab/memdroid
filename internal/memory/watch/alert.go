@@ -2,6 +2,7 @@ package watch
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"time"
 
@@ -108,6 +109,9 @@ func (a AlertAction) String() string {
 // WatchWithAlert starts a conditional watch. When the condition fires, the
 // action is executed (notify or write).
 func (aw *AlertWatcher) WatchWithAlert(drv driver.Driver, pid int, vt search.ValueType, cfg AlertConfig, interval time.Duration) error {
+	if interval <= 0 {
+		return fmt.Errorf("interval must be positive")
+	}
 	size := vt.Size()
 	if size == 0 {
 		return fmt.Errorf("alert does not support the %s type", vt)
@@ -124,9 +128,10 @@ func (aw *AlertWatcher) WatchWithAlert(drv driver.Driver, pid int, vt search.Val
 		return fmt.Errorf("alert: initial read failed: %w", err)
 	}
 
-	return aw.pool.Start(cfg.Addr, func(stop <-chan struct{}) {
+	return aw.pool.StartContext(driver.Context(drv), cfg.Addr, func(ctx context.Context) {
+		drv = driver.WithContext(drv, ctx)
 		lastVal := bytes.Clone(initial)
-		poller.EveryTick(interval, stop, func() {
+		aw.pool.Every(ctx, interval, func() {
 			cur, err := drv.Peek(pid, cfg.Addr, size)
 			if err != nil {
 				return

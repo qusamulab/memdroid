@@ -19,6 +19,9 @@ func TestLoadRebindsSessionToLiveDriver(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored := NewState(fake)
+	if err := restored.Attach(1, "app"); err != nil {
+		t.Fatal(err)
+	}
 	count, err := restored.Load(path)
 	if err != nil || count != 1 {
 		t.Fatalf("Load = %d, %v; want 1, nil", count, err)

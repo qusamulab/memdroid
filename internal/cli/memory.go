@@ -34,6 +34,10 @@ func SetFreezeInterval(st *app.State) {
 }
 
 func Watch(st *app.State) {
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
 	addr, ok := ParseAddr("Address (hex): ")
 	if !ok {
 		return
@@ -47,14 +51,18 @@ func Watch(st *app.State) {
 		fmt.Println("Invalid interval")
 		return
 	}
-	if err := st.Watcher.Watch(st.GetDriver(), st.GetPID(), addr, st.GetValueType(), interval); err != nil {
+	if err := st.Watcher.Watch(target.Driver, target.PID, addr, target.ValueType, interval); err != nil {
 		fmt.Printf("Watch failed: %v\n", err)
 		return
 	}
-	fmt.Printf("Watching 0x%x (%s) every %v\n", addr, st.GetValueType(), interval)
+	fmt.Printf("Watching 0x%x (%s) every %v\n", addr, target.ValueType, interval)
 }
 
 func Dump(st *app.State) {
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
 	addr, ok := ParseAddr("Start address (hex): ")
 	if !ok {
 		return
@@ -68,7 +76,7 @@ func Dump(st *app.State) {
 	if path == "" {
 		path = DefaultDumpFile
 	}
-	if err := modify.DumpRegion(st.GetDriver(), st.GetPID(), addr, size, path); err != nil {
+	if err := modify.DumpRegion(target.Driver, target.PID, addr, size, path); err != nil {
 		fmt.Printf("Dump failed: %v\n", err)
 	} else {
 		fmt.Printf("Dumped %d bytes from 0x%x to %s\n", size, addr, path)
@@ -76,6 +84,10 @@ func Dump(st *app.State) {
 }
 
 func SnapshotDiff(st *app.State) {
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
 	addr, ok := ParseAddr("Start address (hex): ")
 	if !ok {
 		return
@@ -86,7 +98,7 @@ func SnapshotDiff(st *app.State) {
 		return
 	}
 	fmt.Println("Taking snapshot A...")
-	snapA, err := modify.TakeSnapshot(st.GetDriver(), st.GetPID(), addr, size)
+	snapA, err := modify.TakeSnapshot(target.Driver, target.PID, addr, size)
 	if err != nil {
 		fmt.Printf("Snapshot failed: %v\n", err)
 		return
@@ -94,7 +106,7 @@ func SnapshotDiff(st *app.State) {
 	fmt.Printf("Snapshot A: %d bytes at 0x%x\n", len(snapA.Data), addr)
 	Prompt("Make changes in the target process, then press Enter...")
 	fmt.Println("Taking snapshot B...")
-	snapB, err := modify.TakeSnapshot(st.GetDriver(), st.GetPID(), addr, size)
+	snapB, err := modify.TakeSnapshot(target.Driver, target.PID, addr, size)
 	if err != nil {
 		fmt.Printf("Snapshot failed: %v\n", err)
 		return
@@ -129,7 +141,11 @@ func SnapshotDiff(st *app.State) {
 }
 
 func ShowMaps(st *app.State) {
-	regions, err := st.GetDriver().ReadMaps(st.GetPID())
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
+	regions, err := target.Driver.ReadMaps(target.PID)
 	if err != nil {
 		fmt.Printf("Failed to read maps: %v\n", err)
 		return
@@ -196,7 +212,11 @@ func freezeAt(c *cmd) {
 }
 
 func freezeAllCandidates(c *cmd) {
-	count := c.st.Freezer.FreezeAllCandidates(c.drv, c.sess)
+	count, err := c.st.Freezer.FreezeAllCandidates(c.drv, c.sess)
+	if err != nil {
+		fmt.Printf("Freeze: %v\n", err)
+		return
+	}
 	fmt.Printf("Freezing %d addresses\n", count)
 }
 

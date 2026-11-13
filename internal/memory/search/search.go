@@ -2,6 +2,7 @@ package search
 
 import (
 	"bytes"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -11,6 +12,10 @@ import (
 const (
 	// scanWorkers limits concurrent ADB calls during parallel memory reads.
 	scanWorkers = 8
+
+	// Candidate budgets bound map overhead as well as retained payload.
+	MaxCandidates     = 100000
+	MaxCandidateBytes = 16 << 20
 
 	// scanChunkBytes bounds how much of a region is held in memory at once.
 	// Without it a single multi-gigabyte mapping, times scanWorkers, would
@@ -33,7 +38,24 @@ func (s *Session) Search(target []byte) error {
 
 // SearchFiltered scans memory with a region filter applied.
 func (s *Session) SearchFiltered(target []byte, filter driver.RegionFilter, customStart, customEnd uintptr) error {
-	pid, vt, drv := s.scanContext()
+	return s.searchTyped(target, nil, filter, customStart, customEnd)
+}
+
+// SearchTyped keeps request parsing and scan width together without publishing
+// a type change before the scan succeeds.
+func (s *Session) SearchTyped(target []byte, vt ValueType, filter driver.RegionFilter, start, end uintptr) error {
+	return s.searchTyped(target, &vt, filter, start, end)
+}
+func (s *Session) searchTyped(target []byte, requested *ValueType, filter driver.RegionFilter, customStart, customEnd uintptr) error {
+	op, err := s.begin(false)
+	if err != nil {
+		return err
+	}
+	defer op.finish()
+	pid, vt, drv := op.pid, op.vt, op.drv
+	if requested != nil {
+		vt = *requested
+	}
 
 	regions, err := drv.ReadMapsFiltered(pid, filter, customStart, customEnd)
 	if err != nil {
@@ -48,9 +70,22 @@ func (s *Session) SearchFiltered(target []byte, filter driver.RegionFilter, cust
 		stride = width
 	}
 
-	found := scanRegions(drv, pid, regions, width, equalScan(target, width, stride), nil)
-	s.replace(found)
-	return nil
+	if len(target) == 0 || len(target) != width {
+		return fmt.Errorf("target width does not match the active type")
+	}
+	capCount := min(MaxCandidates, MaxCandidateBytes/width)
+	if capCount == 0 {
+		return fmt.Errorf("search value exceeds candidate byte budget")
+	}
+	found := scanRegions(drv, pid, regions, width, equalScan(target, width, stride), newScanLimit(capCount+1))
+	truncated := len(found) > capCount
+	if truncated {
+		for addr := range found {
+			delete(found, addr)
+			break
+		}
+	}
+	return op.commit(vt, found, truncated)
 }
 
 // scanLimit caps how many matches a scan collects across all workers. A nil
@@ -123,13 +158,20 @@ func scanRegions(drv driver.Driver, pid int, regions []driver.Region, width int,
 			defer func() { <-sem }()
 
 			local := make(map[uintptr][]byte)
-			emit := func(addr uintptr, val []byte) { local[addr] = bytes.Clone(val) }
+			emit := func(addr uintptr, val []byte) {
+				if _, exists := local[addr]; exists {
+					return
+				}
+				if limit != nil && !limit.reserve() {
+					return
+				}
+				local[addr] = bytes.Clone(val)
+			}
 			scanRegionChunked(drv, pid, r, size, width, scan, emit, limit)
 
 			if len(local) == 0 {
 				return
 			}
-			limit.add(len(local))
 			mu.Lock()
 			for addr, val := range local {
 				found[addr] = val
@@ -147,7 +189,7 @@ func scanRegions(drv driver.Driver, pid int, regions []driver.Region, width int,
 func scanRegionChunked(drv driver.Driver, pid int, r driver.Region, size, width int, scan scanFunc, emit emitFunc, limit *scanLimit) {
 	overlap := width - 1
 	for off := 0; off < size; {
-		if limit.reached() {
+		if limit.reached() || driver.Context(drv).Err() != nil {
 			return
 		}
 		n := min(scanChunkBytes, size-off)
@@ -170,5 +212,20 @@ func scanRegionChunked(drv driver.Driver, pid int, r driver.Region, size, width 
 			return // chunk smaller than the overlap; no forward progress possible
 		}
 		off += advance
+	}
+}
+
+func (l *scanLimit) reserve() bool {
+	if l == nil || l.max <= 0 {
+		return true
+	}
+	for {
+		n := l.n.Load()
+		if n >= int64(l.max) {
+			return false
+		}
+		if l.n.CompareAndSwap(n, n+1) {
+			return true
+		}
 	}
 }

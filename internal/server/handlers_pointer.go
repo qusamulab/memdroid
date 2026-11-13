@@ -7,10 +7,11 @@ import (
 )
 
 func (h *handler) pointerScan(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Addr      string `json:"addr"`
 		MaxDepth  int    `json:"max_depth"`
@@ -27,7 +28,7 @@ func (h *handler) pointerScan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "max_offset must not be negative")
 		return
 	}
-	result, err := pointer.Scan(h.state.GetDriver(), pid, addr, req.MaxDepth, uintptr(req.MaxOffset))
+	result, err := pointer.Scan(target.Driver, pid, addr, req.MaxDepth, uintptr(req.MaxOffset))
 	if err != nil {
 		serverError(w, "pointer scan", err)
 		return
@@ -54,10 +55,11 @@ func (h *handler) pointerScan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) pointerResolve(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Label      string  `json:"label"`
 		BaseOffset string  `json:"base_offset"`
@@ -81,7 +83,7 @@ func (h *handler) pointerResolve(w http.ResponseWriter, r *http.Request) {
 		BaseOffset: baseOffset,
 		Offsets:    req.Offsets,
 	}
-	resolved, err := pointer.ResolveChain(h.state.GetDriver(), pid, chain)
+	resolved, err := pointer.ResolveChain(target.Driver, pid, chain)
 	if err != nil {
 		serverError(w, "resolve chain", err)
 		return

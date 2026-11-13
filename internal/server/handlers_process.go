@@ -71,7 +71,11 @@ func (h *handler) processDetach(w http.ResponseWriter, _ *http.Request) {
 	if _, ok := h.requirePID(w); !ok {
 		return
 	}
-	detached, next := h.state.Detach()
+	detached, next, err := h.state.Detach()
+	if err != nil {
+		serverError(w, "detach", err)
+		return
+	}
 	out := map[string]any{"detached": detached}
 	if next.PID != 0 {
 		out["active_pid"] = next.PID
@@ -111,11 +115,12 @@ func (h *handler) processSwitch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) processStop(w http.ResponseWriter, _ *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
-	if err := h.state.GetDriver().Stop(pid); err != nil {
+	pid := target.PID
+	if err := target.Driver.Stop(pid); err != nil {
 		serverError(w, "stop", err)
 		return
 	}
@@ -123,11 +128,12 @@ func (h *handler) processStop(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *handler) processContinue(w http.ResponseWriter, _ *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
-	if err := h.state.GetDriver().Continue(pid); err != nil {
+	pid := target.PID
+	if err := target.Driver.Continue(pid); err != nil {
 		serverError(w, "continue", err)
 		return
 	}

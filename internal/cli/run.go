@@ -17,7 +17,11 @@ func Run(st *app.State, d *adb.ADB, serverURL string) {
 	defer shutdown(st)
 	for {
 		PrintMenu(st, d, serverURL)
-		if !dispatch(st, d, Prompt("")) {
+		choice := Prompt("")
+		if stdinClosed.Load() {
+			return
+		}
+		if !dispatch(st, d, choice) {
 			return
 		}
 	}
@@ -39,11 +43,8 @@ func dispatch(st *app.State, d *adb.ADB, choice string) bool {
 
 // shutdown releases every resource held on the device before exiting.
 func shutdown(st *app.State) {
-	st.Freezer.UnfreezeAll()
-	st.Watcher.UnwatchAll()
-	st.AlertWatcher.RemoveAll()
-	if pid := st.GetPID(); pid != 0 {
-		st.GetDriver().Detach(pid)
+	if err := st.Close(); err != nil {
+		fmt.Printf("Shutdown: %v\n", err)
 	}
 	fmt.Println("Bye!")
 }

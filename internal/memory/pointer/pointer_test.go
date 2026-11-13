@@ -65,7 +65,7 @@ func (f *fakeDriver) SelectDevice(string) error                    { return nil 
 func (f *fakeDriver) DeviceSerial() string                         { return "" }
 func (f *fakeDriver) ListProcesses() ([]driver.ProcessInfo, error) { return nil, nil }
 func (f *fakeDriver) Attach(int) error                             { return nil }
-func (f *fakeDriver) Detach(int)                                   {}
+func (f *fakeDriver) Detach(int) error                             { return nil }
 func (f *fakeDriver) Stop(int) error                               { return nil }
 func (f *fakeDriver) Continue(int) error                           { return nil }
 func (f *fakeDriver) Poke(int, uintptr, []byte) error              { return nil }

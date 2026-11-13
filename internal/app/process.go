@@ -1,7 +1,9 @@
 package app
 
 import (
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"slices"
 
 	"memdroid/internal/memory/search"
@@ -20,11 +22,33 @@ var ErrProcessNotAttached = errors.New("pid is not attached")
 func (s *State) Attach(pid int, name string) error {
 	s.processMu.Lock()
 	defer s.processMu.Unlock()
+	if pid <= 0 {
+		return fmt.Errorf("pid must be positive")
+	}
+	if s.closed {
+		return fmt.Errorf("application is closing")
+	}
 	if err := s.drv.Attach(pid); err != nil {
 		return err
 	}
+	identity := rand.Text()
+	if d, ok := s.drv.(interface{ ProcessIdentity(int) (string, error) }); ok {
+		var err error
+		identity, err = d.ProcessIdentity(pid)
+		if err != nil {
+			resumeErr := s.drv.Detach(pid)
+			if resumeErr != nil {
+				s.mu.Lock()
+				s.attached[pid] = name
+				s.mu.Unlock()
+			}
+			return errors.Join(err, resumeErr)
+		}
+	}
+	s.stopActive()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.identities[pid] = identity
 	s.attached[pid] = name
 	s.activateLocked(pid)
 	return nil
@@ -34,11 +58,15 @@ func (s *State) Attach(pid int, name string) error {
 func (s *State) SwitchProcess(pid int) error {
 	s.processMu.Lock()
 	defer s.processMu.Unlock()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.attached[pid]; !ok {
+	s.mu.RLock()
+	_, ok := s.attached[pid]
+	s.mu.RUnlock()
+	if !ok || s.closed {
 		return ErrProcessNotAttached
 	}
+	s.stopActive()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.activateLocked(pid)
 	return nil
 }
@@ -46,7 +74,9 @@ func (s *State) SwitchProcess(pid int) error {
 // activateLocked requires s.mu to be held for writing.
 func (s *State) activateLocked(pid int) {
 	s.pid = pid
-	s.session = search.NewSession(pid, s.valueType, s.drv)
+	s.target = newTarget(s.drv, pid)
+	s.session = search.NewSession(pid, s.valueType, s.target)
+	s.session.SetIdentity(s.identities[pid])
 }
 
 func (s *State) GetPID() int {
@@ -89,34 +119,56 @@ func (s *State) ListAttached() []AttachedProcess {
 //
 // The CLI and the HTTP API both need exactly this sequence; keeping it here
 // stops the two paths from drifting apart.
-func (s *State) Detach() (detached int, next AttachedProcess) {
+func (s *State) Detach() (detached int, next AttachedProcess, err error) {
 	s.processMu.Lock()
 	defer s.processMu.Unlock()
-	// Keep device I/O outside the state lock so reads remain available.
-	s.mu.Lock()
+	s.mu.RLock()
 	pid := s.pid
+	s.mu.RUnlock()
 	if pid == 0 {
-		s.mu.Unlock()
-		return 0, AttachedProcess{}
+		return 0, AttachedProcess{}, nil
 	}
-	delete(s.attached, pid)
-	drv := s.drv
-	s.mu.Unlock()
-
-	s.Freezer.UnfreezeAll()
-	s.Watcher.UnwatchAll()
-	s.AlertWatcher.RemoveAll()
-	drv.Detach(pid)
-
+	s.stopActive()
+	if err := s.drv.Detach(pid); err != nil {
+		s.mu.Lock()
+		s.activateLocked(pid)
+		s.mu.Unlock()
+		return 0, AttachedProcess{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	delete(s.attached, pid)
+	delete(s.identities, pid)
 	for _, p := range s.sortedAttachedLocked() {
 		s.activateLocked(p.PID)
-		return pid, p
+		return pid, p, nil
 	}
-	s.pid = 0
-	s.session = nil
-	return pid, AttachedProcess{}
+	s.pid, s.session, s.target = 0, nil, nil
+	return pid, AttachedProcess{}, nil
+}
+
+// Close rejects future attachments, joins background work and resumes every
+// attached process. Failures remain tracked so a subsequent Close can retry.
+func (s *State) Close() error {
+	s.processMu.Lock()
+	defer s.processMu.Unlock()
+	s.closed = true
+	s.stopActive()
+	var errs []error
+	for _, p := range s.ListAttached() {
+		if err := s.drv.Detach(p.PID); err != nil {
+			errs = append(errs, fmt.Errorf("detach PID %d: %w", p.PID, err))
+			continue
+		}
+		s.mu.Lock()
+		delete(s.attached, p.PID)
+		delete(s.identities, p.PID)
+		s.mu.Unlock()
+	}
+	s.mu.Lock()
+	s.pid, s.session, s.target = 0, nil, nil
+	s.mu.Unlock()
+	return errors.Join(errs...)
 }
 
 // sortedAttachedLocked returns the attached processes ordered by PID. The

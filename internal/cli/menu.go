@@ -47,7 +47,7 @@ var menu = []menuSection{
 		{"10", "Filter: Increased", withSession(filterAction(search.FilterIncreased))},
 		{"11", "Filter: Decreased", withSession(filterAction(search.FilterDecreased))},
 		{"12", "Filter: Specific Value", withSession(filterByValue)},
-		{"13", "Show Candidates", withSession(func(c *cmd) { ShowCandidates(c.st) })},
+		{"13", "Show Candidates", withSession(showCandidates)},
 		{"14", "Reset Search", resetSearch},
 	}},
 	{"Pattern / String", []menuItem{
@@ -126,6 +126,9 @@ func PrintMenu(st *app.State, d *adb.ADB, serverURL string) {
 		fmt.Printf("PID: %d  Type: %s", pid, vt)
 		if sess != nil && sess.HasCandidates() {
 			fmt.Printf("  Candidates: %d", sess.CandidateCount())
+			if sess.Truncated() {
+				fmt.Print(" (truncated)")
+			}
 		}
 		if depth := st.UndoStack.Depth(); depth > 0 {
 			fmt.Printf("  Undo: %d", depth)

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"testing"
 
-	"memdroid/internal/driver"
 	"memdroid/internal/driver/drivertest"
 	"memdroid/internal/memory/search"
 )
@@ -17,10 +16,9 @@ func newTestState() (*State, *drivertest.Fake) {
 }
 
 func TestNewStateDefaults(t *testing.T) {
-	s, fake := newTestState()
-
-	if got := s.GetDriver(); got != driver.Driver(fake) {
-		t.Errorf("GetDriver() = %v, want the fake driver", got)
+	s, _ := newTestState()
+	if _, err := s.GetDriver().Peek(1, 0x1000, 4); err == nil {
+		t.Fatal("unattached driver allowed memory access")
 	}
 	if got := s.GetPID(); got != 0 {
 		t.Errorf("GetPID() = %d, want 0", got)
@@ -268,7 +266,10 @@ func TestDetachPromotesNextProcess(t *testing.T) {
 	s.SetPID(100)
 	s.NewSession(100)
 
-	detached, next := s.Detach()
+	detached, next, err := s.Detach()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if detached != 100 {
 		t.Errorf("detached = %d, want 100", detached)
@@ -306,7 +307,10 @@ func TestDetachLastProcessClearsState(t *testing.T) {
 	s.SetPID(100)
 	s.NewSession(100)
 
-	detached, next := s.Detach()
+	detached, next, err := s.Detach()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if detached != 100 {
 		t.Errorf("detached = %d, want 100", detached)
@@ -331,7 +335,10 @@ func TestDetachLastProcessClearsState(t *testing.T) {
 func TestDetachWithNothingAttached(t *testing.T) {
 	s, _ := newTestState()
 
-	detached, next := s.Detach()
+	detached, next, err := s.Detach()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if detached != 0 {
 		t.Errorf("detached = %d, want 0", detached)

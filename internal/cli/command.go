@@ -22,14 +22,11 @@ type cmd struct {
 }
 
 func newCmd(st *app.State, d *adb.ADB) *cmd {
-	return &cmd{
-		st:   st,
-		d:    d,
-		drv:  st.GetDriver(),
-		pid:  st.GetPID(),
-		vt:   st.GetValueType(),
-		sess: st.GetSession(),
+	c := &cmd{st: st, d: d, drv: st.GetDriver(), vt: st.GetValueType()}
+	if target, err := st.Capture(); err == nil {
+		c.drv, c.pid, c.vt, c.sess = target.Driver, target.PID, target.ValueType, target.Session
 	}
+	return c
 }
 
 type action func(*cmd)
@@ -54,4 +51,13 @@ func withSession(fn action) action {
 		}
 		fn(c)
 	}
+}
+
+func currentTarget(st *app.State) (app.Target, bool) {
+	target, err := st.Capture()
+	if err != nil {
+		fmt.Println(err)
+		return app.Target{}, false
+	}
+	return target, true
 }

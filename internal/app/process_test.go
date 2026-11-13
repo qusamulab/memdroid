@@ -23,11 +23,11 @@ func (d *processDriver) Attach(pid int) error {
 	return d.Driver.Attach(pid)
 }
 
-func (d *processDriver) Detach(pid int) {
+func (d *processDriver) Detach(pid int) error {
 	d.mu.Lock()
 	d.detached[pid]++
 	d.mu.Unlock()
-	d.Driver.Detach(pid)
+	return d.Driver.Detach(pid)
 }
 
 func TestAttachFailureKeepsCurrentProcess(t *testing.T) {

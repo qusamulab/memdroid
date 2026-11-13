@@ -6,16 +6,22 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"memdroid/internal/memory/search"
 )
+
+var stdinClosed atomic.Bool
 
 var stdinReader = bufio.NewReader(os.Stdin)
 
 // Prompt writes label to stdout and returns the trimmed user input.
 func Prompt(label string) string {
 	fmt.Print(label)
-	s, _ := stdinReader.ReadString('\n')
+	s, err := stdinReader.ReadString('\n')
+	if err != nil && len(s) == 0 {
+		stdinClosed.Store(true)
+	}
 	return strings.TrimSpace(s)
 }
 
