@@ -41,6 +41,9 @@ func (s *State) GetSession() *search.Session {
 func (s *State) SetSession(sess *search.Session) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.session != nil && s.session != sess {
+		s.session.Invalidate()
+	}
 	s.session = sess
 	if sess != nil {
 		// The session becomes the owner of the type; keep the fallback in sync
@@ -54,7 +57,15 @@ func (s *State) SetSession(sess *search.Session) {
 func (s *State) NewSession(pid int) *search.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.session = search.NewSession(pid, s.valueType, s.drv)
+	if s.session != nil {
+		s.session.Invalidate()
+	}
+	drv := s.drv
+	if s.target != nil {
+		drv = s.target
+	}
+	s.session = search.NewSession(pid, s.valueType, drv)
+	s.session.SetIdentity(s.identities[pid])
 	return s.session
 }
 
@@ -64,7 +75,12 @@ func (s *State) EnsureSession() *search.Session {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.session == nil {
-		s.session = search.NewSession(s.pid, s.valueType, s.drv)
+		drv := s.drv
+		if s.target != nil {
+			drv = s.target
+		}
+		s.session = search.NewSession(s.pid, s.valueType, drv)
+		s.session.SetIdentity(s.identities[s.pid])
 	}
 	return s.session
 }

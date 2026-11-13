@@ -34,7 +34,7 @@ type Driver interface {
 	// Process management
 	ListProcesses() ([]ProcessInfo, error)
 	Attach(pid int) error
-	Detach(pid int)
+	Detach(pid int) error
 	Stop(pid int) error
 	Continue(pid int) error
 

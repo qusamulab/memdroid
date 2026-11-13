@@ -61,3 +61,11 @@ func (st *snapshotStore) get(addr uintptr) []byte {
 	defer st.mu.Unlock()
 	return st.data[addr]
 }
+
+func (st *snapshotStore) clear() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	clear(st.data)
+	st.order = nil
+	st.bytes = 0
+}

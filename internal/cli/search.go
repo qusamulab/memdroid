@@ -34,13 +34,14 @@ func SetValueType(st *app.State) {
 		return
 	}
 	st.SetValueType(vt)
-	if sess := st.GetSession(); sess != nil {
-		st.SetSession(search.NewSession(st.GetPID(), vt, st.GetDriver()))
-		fmt.Println("Search session reset for new type")
-	}
+	fmt.Println("Search session reset for new type")
 }
 
 func SearchFiltered(st *app.State) {
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
 	fmt.Println("Region: 1=all  2=heap  3=stack  4=anon  5=custom range")
 	var filter driver.RegionFilter
 	var customStart, customEnd uintptr
@@ -63,31 +64,27 @@ func SearchFiltered(st *app.State) {
 	default:
 		filter = driver.RegionAll
 	}
-	val, ok := ParseValue("Value: ", st.GetValueType())
+	val, ok := ParseValue("Value: ", target.ValueType)
 	if !ok {
 		return
 	}
-	if err := st.EnsureSession().SearchFiltered(val, filter, customStart, customEnd); err != nil {
+	if err := target.Session.SearchTyped(val, target.ValueType, filter, customStart, customEnd); err != nil {
 		fmt.Printf("Search failed: %v\n", err)
+		return
+	}
+	fmt.Printf("Found %d addresses\n", target.Session.CandidateCount())
+	if target.Session.Truncated() {
+		fmt.Println("Candidate limit reached; narrow the value or region.")
 	}
 }
 
-func ShowCandidates(st *app.State) {
-	sess := st.GetSession()
-	vt := st.GetValueType()
-	candidates := sess.Snapshot()
-	if len(candidates) == 0 {
-		fmt.Println("No candidates")
-		return
+func showCandidates(c *cmd) {
+	candidates, total, vt := c.sess.TypedPage(0, MaxCandidatesDisplay)
+	for _, candidate := range candidates {
+		fmt.Printf("  0x%x = %s\n", candidate.Addr, search.FormatValue(candidate.Value, vt))
 	}
-	shown := 0
-	for addr, val := range candidates {
-		fmt.Printf("  0x%x = %s\n", addr, search.FormatValue(val, vt))
-		shown++
-		if shown >= MaxCandidatesDisplay {
-			fmt.Printf("  ... (%d total)\n", len(candidates))
-			break
-		}
+	if total > len(candidates) {
+		fmt.Printf("  ... (%d total)\n", total)
 	}
 }
 
@@ -96,12 +93,15 @@ func searchValue(c *cmd) {
 	if !ok {
 		return
 	}
-	sess := c.st.EnsureSession()
-	if err := sess.Search(val); err != nil {
+	sess := c.sess
+	if err := sess.SearchTyped(val, c.vt, driver.RegionAll, 0, 0); err != nil {
 		fmt.Printf("Search failed: %v\n", err)
 		return
 	}
 	fmt.Printf("Found %d addresses\n", sess.CandidateCount())
+	if sess.Truncated() {
+		fmt.Println("Candidate limit reached; narrow the value or region.")
+	}
 }
 
 // filterAction builds the action for one of the no-argument filter modes.
@@ -140,7 +140,7 @@ func searchByPattern(c *cmd) {
 		fmt.Printf("Invalid pattern: %v\n", err)
 		return
 	}
-	result, err := search.SearchPattern(c.drv, c.pid, pat)
+	result, err := c.sess.SearchPattern(pat)
 	if err != nil {
 		fmt.Printf("Pattern search failed: %v\n", err)
 		return
@@ -154,7 +154,7 @@ func searchByString(enc search.StringEncoding) action {
 		label = "String (UTF-16LE): "
 	}
 	return func(c *cmd) {
-		result, err := search.SearchString(c.drv, c.pid, Prompt(label), enc)
+		result, err := c.sess.SearchString(Prompt(label), enc)
 		if err != nil {
 			fmt.Printf("Search failed: %v\n", err)
 			return

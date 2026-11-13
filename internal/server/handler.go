@@ -126,7 +126,7 @@ func requireDuration(w http.ResponseWriter, ms int, fallback time.Duration) (tim
 	if ms == 0 {
 		return fallback, true
 	}
-	if ms < 0 {
+	if ms < 0 || int64(ms) > int64((1<<63-1)/time.Millisecond) {
 		writeError(w, http.StatusBadRequest, "interval_ms must be positive")
 		return 0, false
 	}
@@ -146,8 +146,9 @@ func (h *handler) requirePID(w http.ResponseWriter) (int, bool) {
 // requireSession returns the active session, writing a 400 when there is none
 // or it holds no candidates.
 func (h *handler) requireSession(w http.ResponseWriter) (*search.Session, bool) {
-	sess := h.state.GetSession()
-	if sess == nil || !sess.HasCandidates() {
+	target, err := h.state.Capture()
+	sess := target.Session
+	if err != nil || sess == nil || !sess.HasCandidates() {
 		writeError(w, http.StatusBadRequest, "no active search session")
 		return nil, false
 	}
@@ -168,4 +169,13 @@ func queryInt(r *http.Request, key string, def, minValue int) int {
 // serverError writes err as a 500 with op for context.
 func serverError(w http.ResponseWriter, op string, err error) {
 	writeError(w, http.StatusInternalServerError, op+": "+err.Error())
+}
+
+func (h *handler) requireTarget(w http.ResponseWriter) (app.Target, bool) {
+	target, err := h.state.Capture()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return app.Target{}, false
+	}
+	return target, true
 }

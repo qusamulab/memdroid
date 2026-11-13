@@ -106,11 +106,12 @@ func (h *handler) deviceDisconnectWifi(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) mapsList(w http.ResponseWriter, _ *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
-	regions, err := h.state.GetDriver().ReadMaps(pid)
+	pid := target.PID
+	regions, err := target.Driver.ReadMaps(pid)
 	if err != nil {
 		serverError(w, "read maps", err)
 		return

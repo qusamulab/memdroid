@@ -5,10 +5,11 @@ import (
 )
 
 func (h *handler) memoryFreeze(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Addr  string `json:"addr"`
 		Value string `json:"value"`
@@ -20,11 +21,11 @@ func (h *handler) memoryFreeze(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	val, ok := requireValue(w, req.Value, h.state.GetValueType())
+	val, ok := requireValue(w, req.Value, target.ValueType)
 	if !ok {
 		return
 	}
-	if err := h.state.Freezer.Freeze(h.state.GetDriver(), pid, addr, val); err != nil {
+	if err := h.state.Freezer.Freeze(target.Driver, pid, addr, val); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -55,7 +56,11 @@ func (h *handler) memoryFreezeAll(w http.ResponseWriter, _ *http.Request) {
 	if !ok {
 		return
 	}
-	count := h.state.Freezer.FreezeAllCandidates(h.state.GetDriver(), sess)
+	count, err := h.state.Freezer.FreezeAllCandidates(sess.Driver(), sess)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	writeOK(w, map[string]any{"count": count})
 }
 

@@ -60,7 +60,11 @@ func Detach(st *app.State) {
 	if !RequireAttached(st.GetPID()) {
 		return
 	}
-	detached, next := st.Detach()
+	detached, next, err := st.Detach()
+	if err != nil {
+		fmt.Printf("Detach failed: %v\n", err)
+		return
+	}
 	fmt.Printf("Detached from PID %d\n", detached)
 	if next.PID != 0 {
 		fmt.Printf("Switched to PID %d (%s)\n", next.PID, next.Name)

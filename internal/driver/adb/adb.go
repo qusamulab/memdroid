@@ -3,11 +3,13 @@
 package adb
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"memdroid/internal/driver"
 )
@@ -24,25 +26,43 @@ func execErr(op string, err error) error {
 
 // ADB implements driver.Driver using the adb CLI.
 type ADB struct {
-	mu     sync.RWMutex
-	serial string // empty = use the single connected device
+	deviceMu    sync.Mutex
+	attached    map[int]struct{}
+	ctx         context.Context
+	fixedSerial *string
+	mu          sync.RWMutex
+	serial      string // empty = use the single connected device
 }
 
 // New returns a new ADB driver. Call SelectDevice before use when multiple
 // devices are connected.
 func New() *ADB {
-	return &ADB{}
+	return &ADB{attached: make(map[int]struct{})}
 }
 
 // --- device helpers ---
 
 func (a *ADB) DeviceSerial() string {
+	if a.fixedSerial != nil {
+		return *a.fixedSerial
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.serial
 }
 
 func (a *ADB) SelectDevice(serial string) error {
+	a.deviceMu.Lock()
+	defer a.deviceMu.Unlock()
+	if a.fixedSerial != nil {
+		return fmt.Errorf("cannot select devices through an operation binding")
+	}
+	if serial == a.DeviceSerial() {
+		return nil
+	}
+	if len(a.attached) > 0 {
+		return fmt.Errorf("detach all processes before changing devices")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.serial = serial
@@ -52,7 +72,12 @@ func (a *ADB) SelectDevice(serial string) error {
 // ConnectWifi connects to a device over TCP/IP (Wi-Fi ADB).
 // addr is "host:port", e.g. "192.168.1.5:5555".
 func (a *ADB) ConnectWifi(addr string) error {
-	out, err := exec.Command("adb", "connect", addr).Output()
+	a.deviceMu.Lock()
+	defer a.deviceMu.Unlock()
+	if a.fixedSerial != nil || len(a.attached) > 0 {
+		return fmt.Errorf("detach all processes before changing devices")
+	}
+	out, err := a.command("connect", addr)
 	if err != nil {
 		return execErr(fmt.Sprintf("adb connect %s", addr), err)
 	}
@@ -69,7 +94,12 @@ func (a *ADB) ConnectWifi(addr string) error {
 
 // DisconnectWifi disconnects a TCP/IP device.
 func (a *ADB) DisconnectWifi(addr string) error {
-	_, err := exec.Command("adb", "disconnect", addr).Output()
+	a.deviceMu.Lock()
+	defer a.deviceMu.Unlock()
+	if a.fixedSerial != nil || (len(a.attached) > 0 && a.DeviceSerial() == addr) {
+		return fmt.Errorf("detach all processes before disconnecting the device")
+	}
+	_, err := a.command("disconnect", addr)
 	if err != nil {
 		return execErr(fmt.Sprintf("adb disconnect %s", addr), err)
 	}
@@ -83,7 +113,7 @@ func (a *ADB) DisconnectWifi(addr string) error {
 
 // ListDevices returns the serial numbers of all connected devices/emulators.
 func (a *ADB) ListDevices() ([]string, error) {
-	out, err := exec.Command("adb", "devices").Output()
+	out, err := a.command("devices")
 	if err != nil {
 		return nil, execErr("adb devices", err)
 	}
@@ -105,7 +135,7 @@ func (a *ADB) ListDevices() ([]string, error) {
 func (a *ADB) shell(args ...string) ([]byte, error) {
 	cmdArgs := a.baseArgs("shell")
 	cmdArgs = append(cmdArgs, args...)
-	out, err := exec.Command("adb", cmdArgs...).Output()
+	out, err := a.command(cmdArgs...)
 	if err != nil {
 		return nil, execErr(fmt.Sprintf("adb shell %s", strings.Join(args, " ")), err)
 	}
@@ -119,9 +149,7 @@ func (a *ADB) shellRoot(cmd string) ([]byte, error) {
 
 // baseArgs prepends [-s serial] when a device is selected.
 func (a *ADB) baseArgs(verb string) []string {
-	a.mu.RLock()
-	s := a.serial
-	a.mu.RUnlock()
+	s := a.DeviceSerial()
 	if s != "" {
 		return []string{"-s", s, verb}
 	}
@@ -130,3 +158,30 @@ func (a *ADB) baseArgs(verb string) []string {
 
 // Compile-time check.
 var _ driver.Driver = (*ADB)(nil)
+
+// Context returns the lifetime of this transport binding.
+func (a *ADB) Context() context.Context {
+	if a.ctx != nil {
+		return a.ctx
+	}
+	return context.Background()
+}
+
+// WithContext fixes the selected serial for the whole operation, including
+// multi-command reads. Later UI selection changes cannot retarget it.
+func (a *ADB) WithContext(ctx context.Context) driver.Driver {
+	serial := a.DeviceSerial()
+	return &ADB{ctx: ctx, fixedSerial: &serial}
+}
+
+func (a *ADB) command(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(a.Context(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "adb", args...)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return out, err
+}

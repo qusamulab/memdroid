@@ -12,10 +12,11 @@ const (
 )
 
 func (h *handler) memoryModify(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Addr  string `json:"addr"`
 		Value string `json:"value"`
@@ -27,11 +28,11 @@ func (h *handler) memoryModify(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	val, ok := requireValue(w, req.Value, h.state.GetValueType())
+	val, ok := requireValue(w, req.Value, target.ValueType)
 	if !ok {
 		return
 	}
-	if err := h.state.UndoStack.WithUndo(h.state.GetDriver(), pid, addr, val); err != nil {
+	if err := h.state.UndoStack.WithUndo(target.Driver, pid, addr, val); err != nil {
 		serverError(w, "modify", err)
 		return
 	}
@@ -40,10 +41,11 @@ func (h *handler) memoryModify(w http.ResponseWriter, r *http.Request) {
 
 // memoryWriteString overwrites a string in place with raw UTF-8 bytes.
 func (h *handler) memoryWriteString(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Addr  string `json:"addr"`
 		Value string `json:"value"`
@@ -59,7 +61,7 @@ func (h *handler) memoryWriteString(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "value required")
 		return
 	}
-	if err := modify.WriteString(h.state.GetDriver(), pid, addr, req.Value); err != nil {
+	if err := modify.WriteString(target.Driver, pid, addr, req.Value); err != nil {
 		serverError(w, "write string", err)
 		return
 	}
@@ -75,10 +77,11 @@ func (h *handler) memoryUndo(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *handler) memoryHexdump(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	addr, ok := requireAddr(w, r.URL.Query().Get("addr"))
 	if !ok {
 		return
@@ -87,7 +90,7 @@ func (h *handler) memoryHexdump(w http.ResponseWriter, r *http.Request) {
 	if !requireSize(w, size, maxHexdumpBytes) {
 		return
 	}
-	data, err := h.state.GetDriver().ReadRegion(pid, addr, size)
+	data, err := target.Driver.ReadRegion(pid, addr, size)
 	if err != nil {
 		serverError(w, "read region", err)
 		return
@@ -109,10 +112,11 @@ func (h *handler) memoryHexdump(w http.ResponseWriter, r *http.Request) {
 
 // memoryDump writes a region to a file on the host running memdroid.
 func (h *handler) memoryDump(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Addr string `json:"addr"`
 		Size int    `json:"size"`
@@ -132,7 +136,7 @@ func (h *handler) memoryDump(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := modify.DumpRegion(h.state.GetDriver(), pid, addr, req.Size, path); err != nil {
+	if err := modify.DumpRegion(target.Driver, pid, addr, req.Size, path); err != nil {
 		serverError(w, "dump", err)
 		return
 	}

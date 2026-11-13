@@ -2,6 +2,7 @@ package watch
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"time"
 
@@ -40,6 +41,9 @@ func (w *Watcher) OnChange(fn func(ChangeEvent)) (remove func()) {
 // Returns an error if addr is already being watched, the type has no fixed
 // size, or the initial read fails.
 func (w *Watcher) Watch(drv driver.Driver, pid int, addr uintptr, vt search.ValueType, interval time.Duration) error {
+	if interval <= 0 {
+		return fmt.Errorf("interval must be positive")
+	}
 	size := vt.Size()
 	if size == 0 {
 		return fmt.Errorf("watch does not support the %s type", vt)
@@ -51,8 +55,9 @@ func (w *Watcher) Watch(drv driver.Driver, pid int, addr uintptr, vt search.Valu
 	}
 	last := bytes.Clone(initial)
 
-	return w.pool.Start(addr, func(stop <-chan struct{}) {
-		poller.EveryTick(interval, stop, func() {
+	return w.pool.StartContext(driver.Context(drv), addr, func(ctx context.Context) {
+		drv = driver.WithContext(drv, ctx)
+		w.pool.Every(ctx, interval, func() {
 			cur, err := drv.Peek(pid, addr, size)
 			if err != nil {
 				return

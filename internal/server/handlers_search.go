@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"errors"
 	"net/http"
 
 	"memdroid/internal/driver"
@@ -59,7 +61,8 @@ func parseRegionFilter(w http.ResponseWriter, name, startStr, endStr string) (dr
 }
 
 func (h *handler) searchValue(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requirePID(w); !ok {
+	target, ok := h.requireTarget(w)
+	if !ok {
 		return
 	}
 	req, ok := decodeJSON[struct {
@@ -73,9 +76,14 @@ func (h *handler) searchValue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vt, ok := h.applyValueType(w, req.Type)
-	if !ok {
-		return
+	vt := target.ValueType
+	if req.Type != "" {
+		var err error
+		vt, err = search.ParseValueType(req.Type)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	val, ok := requireValue(w, req.Value, vt)
 	if !ok {
@@ -86,16 +94,16 @@ func (h *handler) searchValue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess := h.state.EnsureSession()
-	if err := sess.SearchFiltered(val, filter, start, end); err != nil {
-		serverError(w, "search", err)
+	sess := target.Session
+	if err := sess.SearchTyped(val, vt, filter, start, end); err != nil {
+		searchError(w, "search", err)
 		return
 	}
-	writeJSON(w, map[string]any{"candidates": sess.CandidateCount()})
+	writeJSON(w, map[string]any{"candidates": sess.CandidateCount(), "truncated": sess.Truncated()})
 }
 
 func (h *handler) searchPattern(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
@@ -110,16 +118,21 @@ func (h *handler) searchPattern(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result, err := search.SearchPattern(h.state.GetDriver(), pid, pat)
-	if err != nil {
-		serverError(w, "pattern search", err)
+	if len(pat) > search.MaxPatternBytes {
+		writeError(w, http.StatusBadRequest, "pattern exceeds candidate byte budget")
 		return
 	}
-	h.writeScanResult(w, result)
+	sess := target.Session
+	result, err := sess.SearchPattern(pat)
+	if err != nil {
+		searchError(w, "pattern search", err)
+		return
+	}
+	h.writeScanResult(w, sess, result)
 }
 
 func (h *handler) searchString(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
@@ -130,25 +143,30 @@ func (h *handler) searchString(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.Value == "" {
+		writeError(w, http.StatusBadRequest, "empty string")
+		return
+	}
 	enc, err := search.ParseStringEncoding(req.Encoding)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result, err := search.SearchString(h.state.GetDriver(), pid, req.Value, enc)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if len(search.StringBytes(req.Value, enc)) > search.MaxPatternBytes {
+		writeError(w, http.StatusBadRequest, "string exceeds candidate byte budget")
 		return
 	}
-	h.writeScanResult(w, result)
+	sess := target.Session
+	result, err := sess.SearchString(req.Value, enc)
+	if err != nil {
+		searchError(w, "string search", err)
+		return
+	}
+	h.writeScanResult(w, sess, result)
 }
 
-// writeScanResult loads a pattern/string scan into the session as byte
-// candidates so they can be paged, filtered and frozen like any other result.
-// The scan already returns the matched bytes, so no re-read is needed.
-func (h *handler) writeScanResult(w http.ResponseWriter, result search.PatternResult) {
-	sess := h.state.EnsureSession()
-	sess.SetCandidatesAs(search.TypeBytes, result.CandidateMap())
+// writeScanResult reports a result already committed to the captured session.
+func (h *handler) writeScanResult(w http.ResponseWriter, sess *search.Session, result search.PatternResult) {
 	writeJSON(w, map[string]any{
 		"count":      len(result.Matches),
 		"candidates": sess.CandidateCount(),
@@ -180,14 +198,18 @@ func (h *handler) searchFilter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := sess.Filter(mode, target); err != nil {
+		if errors.Is(err, search.ErrSearchConflict) || errors.Is(err, search.ErrSearchBusy) {
+			searchError(w, "filter", err)
+			return
+		}
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, map[string]any{"candidates": sess.CandidateCount()})
+	writeJSON(w, map[string]any{"candidates": sess.CandidateCount(), "truncated": sess.Truncated()})
 }
 
 func (h *handler) searchCandidates(w http.ResponseWriter, r *http.Request) {
-	pageSize := queryInt(r, "page_size", defaultPageSize, 1)
+	pageSize := min(queryInt(r, "page_size", defaultPageSize, 1), 1000)
 	page := queryInt(r, "page", 0, 0)
 
 	sess := h.state.GetSession()
@@ -196,10 +218,9 @@ func (h *handler) searchCandidates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vt := sess.Type()
 	// Page copies only the requested slice, so this stays cheap even when the
 	// candidate set has millions of entries.
-	candidates, total := sess.Page(page*pageSize, pageSize)
+	candidates, total, vt := sess.TypedPage(page*pageSize, pageSize)
 
 	type entry struct {
 		Addr  hexAddr `json:"addr"`
@@ -248,4 +269,12 @@ func (h *handler) searchSetType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeOK(w, map[string]any{"value_type": vt.String()})
+}
+
+func searchError(w http.ResponseWriter, op string, err error) {
+	if errors.Is(err, search.ErrSearchConflict) || errors.Is(err, search.ErrSearchBusy) || errors.Is(err, context.Canceled) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
+	serverError(w, op, err)
 }

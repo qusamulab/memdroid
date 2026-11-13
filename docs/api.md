@@ -92,9 +92,18 @@ The value type is owned by the search session, so passing `"type"` to
 `/api/search/value` switches the type and rescans at the new width; existing
 candidates are discarded because they were recorded at the old width.
 
-Pattern and string scans stop at 200 matches and set `"truncated": true` when
-they do. Their results become `bytes`-typed candidates in the session, so they
+Value scans retain up to 100,000 candidates within a 16 MiB payload budget.
+Pattern and string scans retain up to 200 matches; their encoded pattern width
+is limited so 201 matches fit within 16 MiB. Scans collect one extra match to
+detect truncation. Responses set `"truncated": true` when results are incomplete;
+filtering preserves that marker. Candidate pages contain at most 1,000 items.
+Concurrent scans or results invalidated by Reset, type changes or process
+transitions return HTTP 409. Their results become `bytes`-typed candidates in the session, so they
 can be filtered, paged and frozen like any other result.
+
+Device selection and Wi-Fi auto-selection are rejected while processes are
+attached. Detach all processes before changing devices. Switching the active
+process stops its background tasks and clears Undo and region snapshots.
 
 ## Pointer Scan
 
@@ -122,6 +131,11 @@ Offsets are in base→final application order. Resolve returns
 | GET | `/api/memory/frozen` | — | List frozen addresses |
 | GET | `/api/memory/hexdump` | `?addr=0x...&size=256` | Hex view (max 4096 bytes) |
 | POST | `/api/memory/dump` | `{"addr":"0x...","size":65536,"path":"dump.hex"}` | Write a region to a file on the host |
+
+Freeze, watch and alert pools each support at most 128 addresses and eight
+simultaneous I/O calls. Freeze values are limited to 64 KiB each. Freeze-all
+returns an error if the candidate set exceeds the remaining task budget.
+Unfreeze and removal return after the worker has exited.
 
 ## Watch
 
@@ -183,7 +197,12 @@ also requires `write_value`.
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
 | POST | `/api/session/save` | `{"path":"memdroid.json"}` | Save bookmarks + candidates |
-| POST | `/api/session/load` | `{"path":"memdroid.json"}` | Load bookmarks + candidates |
+| POST | `/api/session/load` | `{"path":"memdroid.json"}` | Validate identity, then load bookmarks + candidates |
+
+Saved candidates require an attachment to the same device, boot and process
+start time (not just the same PID). Identity-less candidates from older files
+are rejected; legacy bookmark-only files remain supported. Failed validation
+leaves current bookmarks and candidates intact. Files are limited to 64 MiB.
 
 `path` is optional and defaults to `memdroid.json`.
 
@@ -214,6 +233,7 @@ Failures return the matching status code and `{"error":"..."}`:
 | Status | Meaning |
 |--------|---------|
 | 400 | Bad input, no process attached, or no active search session |
+| 409 | Search already running or its target/session changed |
 | 401 | Missing or invalid token |
 | 403 | Cross-origin WebSocket handshake |
 | 405 | Wrong HTTP method for the path |

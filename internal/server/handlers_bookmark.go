@@ -62,22 +62,23 @@ func (h *handler) bookmarkRemove(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) bookmarkModifyAll(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Value string `json:"value"`
 	}](w, r)
 	if !ok {
 		return
 	}
-	vt := h.state.GetValueType()
+	vt := target.ValueType
 	val, ok := requireValue(w, req.Value, vt)
 	if !ok {
 		return
 	}
-	count := h.state.GetBookmarks().ModifyAll(h.state.GetDriver(), pid, val, vt)
+	count := h.state.GetBookmarks().ModifyAll(target.Driver, pid, val, vt)
 	writeOK(w, map[string]any{"count": count})
 }
 

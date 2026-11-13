@@ -9,10 +9,11 @@ import (
 const defaultPollInterval = 500 * time.Millisecond
 
 func (h *handler) watchAdd(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Addr       string `json:"addr"`
 		IntervalMs int    `json:"interval_ms"`
@@ -28,8 +29,8 @@ func (h *handler) watchAdd(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	vt := h.state.GetValueType()
-	if err := h.state.Watcher.Watch(h.state.GetDriver(), pid, addr, vt, interval); err != nil {
+	vt := target.ValueType
+	if err := h.state.Watcher.Watch(target.Driver, pid, addr, vt, interval); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -14,6 +14,9 @@ import (
 // the scan stops early. Results report Truncated when the cap was hit.
 const PatternMaxResults = 200
 
+// MaxPatternBytes bounds payload retained for 200 results and the overflow probe.
+const MaxPatternBytes = MaxCandidateBytes / (PatternMaxResults + 1)
+
 // PatternByte represents one byte in a search pattern; Wildcard=true matches any byte.
 type PatternByte struct {
 	Value    byte
@@ -92,6 +95,9 @@ func (r PatternResult) CandidateMap() map[uintptr][]byte {
 func SearchPattern(drv driver.Driver, pid int, pattern Pattern) (PatternResult, error) {
 	if len(pattern) == 0 {
 		return PatternResult{}, fmt.Errorf("empty pattern")
+	}
+	if len(pattern) > MaxPatternBytes {
+		return PatternResult{}, fmt.Errorf("pattern exceeds candidate byte budget")
 	}
 
 	regions, err := drv.ReadMaps(pid)

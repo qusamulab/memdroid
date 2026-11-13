@@ -7,10 +7,11 @@ import (
 )
 
 func (h *handler) alertAdd(w http.ResponseWriter, r *http.Request) {
-	pid, ok := h.requirePID(w)
+	target, ok := h.requireTarget(w)
 	if !ok {
 		return
 	}
+	pid := target.PID
 	req, ok := decodeJSON[struct {
 		Addr       string `json:"addr"`
 		Condition  string `json:"condition"`
@@ -41,7 +42,7 @@ func (h *handler) alertAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vt := h.state.GetValueType()
+	vt := target.ValueType
 	cfg := watch.AlertConfig{Addr: addr, Condition: cond, Action: action}
 	if cond != watch.AlertChanged {
 		if cfg.Threshold, ok = requireValue(w, req.Threshold, vt); !ok {
@@ -54,7 +55,7 @@ func (h *handler) alertAdd(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.state.AlertWatcher.WatchWithAlert(h.state.GetDriver(), pid, vt, cfg, interval); err != nil {
+	if err := h.state.AlertWatcher.WatchWithAlert(target.Driver, pid, vt, cfg, interval); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

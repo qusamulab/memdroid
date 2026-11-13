@@ -12,6 +12,10 @@ import (
 const DefaultAlertPollInterval = "500ms"
 
 func SetAlert(st *app.State) {
+	target, attached := currentTarget(st)
+	if !attached {
+		return
+	}
 	addr, ok := ParseAddr("Address (hex): ")
 	if !ok {
 		return
@@ -22,7 +26,7 @@ func SetAlert(st *app.State) {
 		fmt.Printf("%v\n", err)
 		return
 	}
-	vt := st.GetValueType()
+	vt := target.ValueType
 	cfg := watch.AlertConfig{
 		Addr:      addr,
 		Condition: cond,
@@ -53,7 +57,7 @@ func SetAlert(st *app.State) {
 		fmt.Println("Invalid interval")
 		return
 	}
-	if err := st.AlertWatcher.WatchWithAlert(st.GetDriver(), st.GetPID(), vt, cfg, interval); err != nil {
+	if err := st.AlertWatcher.WatchWithAlert(target.Driver, target.PID, vt, cfg, interval); err != nil {
 		fmt.Printf("Alert failed: %v\n", err)
 		return
 	}

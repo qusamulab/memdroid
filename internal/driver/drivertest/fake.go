@@ -98,10 +98,11 @@ func (f *Fake) Attach(pid int) error {
 	return nil
 }
 
-func (f *Fake) Detach(pid int) {
+func (f *Fake) Detach(pid int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.attached, pid)
+	return nil
 }
 
 // Attached reports whether pid is currently attached.
@@ -198,3 +199,8 @@ func (f *Fake) ReadMapsFiltered(_ int, filter driver.RegionFilter, customStart, 
 
 // Compile-time check.
 var _ driver.Driver = (*Fake)(nil)
+
+// ProcessIdentity is stable for a fake process and differs across devices/PIDs.
+func (f *Fake) ProcessIdentity(pid int) (string, error) {
+	return fmt.Sprintf("%s:%d", f.DeviceSerial(), pid), nil
+}
